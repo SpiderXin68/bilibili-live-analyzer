@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+*.pyo
+venv/
+.env
+data/live_analytics.db*
+.bilibili_cookie.txt
+node_modules/
+.vite/
+dist/

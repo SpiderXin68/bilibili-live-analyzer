@@ -1,0 +1,1375 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>B站直播弹幕实时分析平台</title>
+    <script src="/static/vue.global.prod.js">
+    </script>
+    <script src="/static/echarts.min.js">
+    </script>
+    <style>
+        /* ── 全局样式 ── */
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box; }
+
+        :root {
+            --bg: #0f0f1a;
+            --card: #1a1a2e;
+            --card-hover: #222244;
+            --accent: #ff6b6b;
+            --accent2: #feca57;
+            --accent3: #48dbfb;
+            --accent4: #ff9ff3;
+            --text: #e0e0e0;
+            --text-dim: #888;
+            --border: #2a2a44;
+            --success: #2ecc71;
+            --danger: #e74c3c; }
+
+        body {
+            font-family: 'PingFang SC', 'Microsoft YaHei', -apple-system, sans-serif;
+            background: var(--bg);
+            color: var(--text);
+            min-height: 100vh;
+            overflow-x: hidden; }
+
+        ::-webkit-scrollbar { width: 6px; }
+        ::-webkit-scrollbar-track { background: var(--bg); }
+        ::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+        /* ── 顶部导航 ── */
+        .header {
+            background: linear-gradient(135deg, var(--card) 0%, #1a0a2e 100%);
+            padding: 16px 24px;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            border-bottom: 1px solid var(--border);
+            position: sticky;
+            top: 0;
+            z-index: 100; }
+
+        .header-left { display: flex; align-items: center; gap: 16px; }
+        .header h1 {
+            font-size: 1.3rem;
+            background: linear-gradient(90deg, var(--accent), var(--accent2));
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text; }
+
+        .room-controls {
+            display: flex;
+            align-items: center;
+            gap: 8px; }
+
+        .room-controls input {
+            background: var(--bg);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 6px 12px;
+            color: var(--text);
+            font-size: 0.85rem;
+            width: 140px;
+            outline: none;
+            transition: border-color 0.2s; }
+        .room-controls input:focus { border-color: var(--accent); }
+
+        .btn {
+            padding: 6px 16px;
+            border: none;
+            border-radius: 6px;
+            font-size: 0.85rem;
+            cursor: pointer;
+            transition: all 0.2s;
+            font-weight: 500; }
+        .btn:hover { transform: translateY(-1px); opacity: 0.9; }
+        .btn-connect {
+            background: linear-gradient(135deg, var(--accent), #ee5a24);
+            color: #fff; }
+        .btn-danger {
+            background: linear-gradient(135deg, var(--danger), #c0392b);
+            color: #fff; }
+        .btn-sm { padding: 4px 10px; font-size: 0.8rem; }
+
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 4px 12px;
+            border-radius: 12px;
+            font-size: 0.75rem;
+            background: var(--card); }
+        .status-badge .dot {
+            width: 8px; height: 8px;
+            border-radius: 50%;
+            display: inline-block; }
+        .dot.on { background: var(--success); box-shadow: 0 0 6px var(--success); }
+        .dot.off { background: var(--danger); }
+
+        .header-right {
+            display: flex;
+            align-items: center;
+            gap: 12px; }
+
+        .room-title {
+            font-size: 0.8rem;
+            color: var(--text-dim);
+            max-width: 300px;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap; }
+        .room-title strong { color: var(--text); }
+
+        /* ── 指标看板 ── */
+        .stats-bar {
+            display: grid;
+            grid-template-columns: repeat(5, 1fr);
+            gap: 12px;
+            padding: 16px 24px;
+            background: var(--card);
+            border-bottom: 1px solid var(--border); }
+
+        .stat-item {
+            text-align: center;
+            padding: 8px; }
+        .stat-item .label {
+            font-size: 0.7rem;
+            color: var(--text-dim);
+            text-transform: uppercase;
+            letter-spacing: 1px; }
+        .stat-item .value {
+            font-size: 1.6rem;
+            font-weight: bold;
+            margin-top: 2px; }
+        .stat-item .value.accent { color: var(--accent); }
+        .stat-item .value.accent2 { color: var(--accent2); }
+        .stat-item .value.accent3 { color: var(--accent3); }
+        .stat-item .value.accent4 { color: var(--accent4); }
+
+        /* ── 主布局 ── */
+        .main-grid {
+            display: grid;
+            grid-template-columns: 320px 1fr 320px;
+            gap: 12px;
+            padding: 12px 24px;
+            min-height: calc(100vh - 200px); }
+
+        .card {
+            background: var(--card);
+            border-radius: 10px;
+            padding: 16px;
+            border: 1px solid var(--border); }
+        .card-title {
+            font-size: 0.85rem;
+            color: var(--text-dim);
+            margin-bottom: 12px;
+            display: flex;
+            align-items: center;
+            gap: 6px; }
+        .card-title .badge {
+            margin-left: auto;
+            font-size: 0.7rem;
+            color: var(--accent2); }
+
+        /* ── 弹幕流 ── */
+        .danmaku-stream {
+            height: calc(100vh - 250px);
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 4px; }
+
+        .dm-item {
+            padding: 6px 10px;
+            border-radius: 6px;
+            background: rgba(255,255,255,0.03);
+            border-left: 3px solid var(--accent);
+            animation: slideIn 0.3s ease;
+            font-size: 0.85rem; }
+        .dm-item .user {
+            color: var(--accent2);
+            font-weight: 500;
+            margin-right: 8px; }
+        .dm-item .time {
+            font-size: 0.7rem;
+            color: var(--text-dim);
+            float: right; }
+        .dm-item.gift { border-left-color: var(--success); }
+        .dm-item.sc { border-left-color: var(--accent4); }
+        .dm-item.enter { border-left-color: var(--accent3); }
+
+        @keyframes slideIn {
+            from { opacity: 0; transform: translateX(-20px); }
+            to { opacity: 1; transform: translateX(0); } }
+
+        /* ── 图表容器 ── */
+        .chart-container {
+            height: 180px;
+            width: 100%; }
+        .chart-lg { height: 300px; }
+
+        .charts-top {
+            display: flex;
+            flex-direction: column;
+            gap: 12px; }
+
+        .charts-bottom {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 12px;
+            margin-top: 12px; }
+
+        /* ── 事件流 ── */
+        .event-stream {
+            height: calc(100vh - 400px);
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 4px; }
+
+        .evt-item {
+            padding: 6px 10px;
+            border-radius: 6px;
+            background: rgba(255,255,255,0.03);
+            font-size: 0.8rem; }
+        .evt-item .label { color: var(--text-dim); margin-right: 4px; }
+        .evt-item .uname { color: var(--accent2); }
+        .evt-item.gift .uname { color: var(--success); }
+        .evt-item.sc .uname { color: var(--accent4); }
+        .evt-item .price { color: var(--accent); font-weight: bold; }
+
+        .event-tabs {
+            display: flex;
+            gap: 4px;
+            margin-bottom: 8px; }
+        .event-tab {
+            padding: 3px 10px;
+            border-radius: 4px;
+            font-size: 0.75rem;
+            background: var(--bg);
+            border: 1px solid transparent;
+            cursor: pointer;
+            color: var(--text-dim);
+            transition: all 0.2s; }
+        .event-tab:hover { border-color: var(--border); }
+        .event-tab.active { border-color: var(--accent); color: var(--text); }
+
+        /* ── 底部 ── */
+        .footer {
+            text-align: center;
+            padding: 12px;
+            font-size: 0.7rem;
+            color: var(--text-dim);
+            border-top: 1px solid var(--border); }
+
+        /* ── 响应式 ── */
+        @media (max-width: 1200px) {
+            .main-grid {
+                grid-template-columns: 1fr 1fr; }
+            .main-grid > :last-child { grid-column: span 2; } }
+        @media (max-width: 768px) {
+            .main-grid { grid-template-columns: 1fr; }
+            .main-grid > :last-child { grid-column: 1; }
+            .stats-bar { grid-template-columns: repeat(3, 1fr); }
+            .charts-bottom { grid-template-columns: 1fr; }
+            .header { flex-direction: column; gap: 8px; }
+            .header-right { width: 100%; justify-content: center; } }
+    </style>
+</head>
+<body>
+    <div id="app">
+        <!-- 顶部导航 -->
+        <header class="header">
+            <div class="header-left">
+                <h1>📺 B站直播实时看板</h1>
+                <div class="room-controls">
+                    <input v-model="roomInput"
+                           placeholder="直播间号"
+                           @keyup.enter="connectRoom">
+                    <button class="btn btn-connect" @click="connectRoom">
+                        连接
+                    </button>
+                </div>
+                <span class="status-badge">
+                    <span class="dot" :class="connected ? 'on' : 'off'"></span>
+                    {{ connected ? '已连接' : '未连接' }}
+                </span>
+            </div>
+            <div class="header-right">
+                <div class="room-title" v-if="roomInfo.title">
+                    <strong>{{ roomInfo.title }}</strong>
+                    <span v-if="roomInfo.area_name"> · {{ roomInfo.area_name }}</span>
+                </div>
+                <span class="cookie-badge" :class="cookieStatusClass" @click="showCookieModal = true"
+                      :title="cookieTooltip">
+                    🍪 {{ cookieLabel }}
+                </span>
+                <button class="btn btn-sm" @click="exportData" title="导出弹幕数据">📥</button>
+                <button class="btn btn-sm" @click="clearData" title="清空当页数据">🗑️</button>
+            </div>
+        </header>
+
+        <!-- 指标看板 -->
+        <div class="stats-bar">
+            <div class="stat-item">
+                <div class="label">互动总数</div>
+                <div class="value accent">{{ stats.total_interactions || stats.message_count }}</div>
+            </div>
+            <div class="stat-item">
+                <div class="label">在线观众</div>
+                <div class="value accent3">{{ liveOnline }}</div>
+            </div>
+            <div class="stat-item">
+                <div class="label">主播粉丝</div>
+                <div class="value accent2">{{ liveAttention | abbreviate }}</div>
+            </div>
+            <div class="stat-item">
+                <div class="label">活跃用户</div>
+                <div class="value accent4">{{ stats.top_users?.length || 0 }}</div>
+            </div>
+            <div class="stat-item">
+                <div class="label">采集时长</div>
+                <div class="value" style="font-size:1.1rem">{{ uptime }}</div>
+            </div>
+        </div>
+
+        <!-- 主布局 -->
+        <div class="main-grid">
+            <!-- 左侧：弹幕流 -->
+            <div class="card">
+                <div class="card-title">
+                    💬 实时弹幕
+                    <span class="badge">{{ danmakuList.length }} 条</span>
+                </div>
+                <div class="danmaku-stream" ref="dmStream">
+                    <div v-for="(dm, i) in danmakuList" :key="dm.id || i"
+                         class="dm-item"
+                         :class="dm._type">
+                        <span class="time">{{ formatTime(dm.time) }}</span>
+                        <span class="user">{{ dm.username || '游客' }}</span>
+                        <span>{{ dm.text }}</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 中间：图表 -->
+            <div>
+                <div class="charts-top">
+                    <div class="card">
+                        <div class="card-title">📈 弹幕密度 (近1小时)</div>
+                        <div ref="densityChart" class="chart-container chart-lg"></div>
+                    </div>
+                </div>
+
+                <div class="charts-bottom">
+                    <div class="card">
+                        <div class="card-title">🔤 高频短语</div>
+                        <div ref="phraseChart" class="chart-container"></div>
+                    </div>
+                    <div class="card">
+                        <div class="card-title">👥 活跃用户 TOP 10</div>
+                        <div ref="userChart" class="chart-container"></div>
+                    </div>
+                </div>
+
+                <!-- 活跃度/进入人数/活跃比 -->
+                <div class="card" style="margin-top: 12px;">
+                    <div class="card-title" style="display: flex; align-items: center; gap: 8px;">
+                        <span>📊 采样间隔</span>
+                        <select v-model="selectedBucket" @change="fetchActivity"
+                                style="background: var(--bg); color: var(--text); border: 1px solid var(--border);
+                                       border-radius: 4px; padding: 3px 8px; font-size: 0.8rem;">
+                            <option v-for="b in bucketOptions" :key="b" :value="b">
+                                {{ b < 60 ? b + '秒' : (b / 60) + '分钟' }}
+                            </option>
+                        </select>
+                        <span style="margin-left: auto; font-size: 0.75rem; color: var(--text-dim);">
+                            平均在线: <span class="accent3">{{ activityData.total_online_avg }}</span>
+                        </span>
+                    </div>
+                    <div class="charts-bottom">
+                        <div class="card">
+                            <div class="card-title">👤 进入 & 活跃人数</div>
+                            <div ref="activeChart" class="chart-container"></div>
+                        </div>
+                        <div class="card">
+                            <div class="card-title">📈 活跃比 (互动/在线)</div>
+                            <div ref="ratioChart" class="chart-container"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- 右侧：事件流 -->
+            <div class="card">
+                <div class="card-title">
+                    🎯 直播事件
+                    <span class="badge">{{ eventList.length }} 条</span>
+                </div>
+                <div class="event-tabs">
+                    <span class="event-tab"
+                          :class="{ active: eventFilter === 'all' }"
+                          @click="eventFilter = 'all'">全部</span>
+                    <span class="event-tab"
+                          :class="{ active: eventFilter === 'gift' }"
+                          @click="eventFilter = 'gift'">🎁 礼物</span>
+                    <span class="event-tab"
+                          :class="{ active: eventFilter === 'super_chat' }"
+                          @click="eventFilter = 'super_chat'">⭐ SC</span>
+                    <span class="event-tab"
+                          :class="{ active: eventFilter === 'enter' }"
+                          @click="eventFilter = 'enter'">👋 进入</span>
+                    <span class="event-tab"
+                          :class="{ active: eventFilter === 'like' }"
+                          @click="eventFilter = 'like'">❤️ 点赞</span>
+                </div>
+                <div class="event-stream" ref="evtStream">
+                    <div v-for="(evt, i) in filteredEvents" :key="'e'+i"
+                         class="evt-item"
+                         :class="evt.event_type">
+                        <span class="time" style="font-size:0.7rem;color:var(--text-dim);float:right">
+                            {{ formatTime(evt.timestamp) }}
+                        </span>
+                        <template v-if="evt.event_type === 'gift'">
+                            🎁 <span class="uname">{{ evt.username }}</span>
+                            送了 <span class="price">{{ evt.content?.num || 1 }}</span> 个
+                            {{ evt.content?.gift_name || '礼物' }}
+                            (¥{{ (evt.content?.price || 0) / 1000 }})
+                        </template>
+                        <template v-else-if="evt.event_type === 'super_chat'">
+                            ⭐ <span class="uname">{{ evt.username }}</span>
+                            上舰: ¥{{ (evt.content?.price || 0) }}
+                            <span style="font-size:0.7rem;color:var(--text-dim);display:block;margin-top:2px">
+                                {{ evt.content?.text || '' }}
+                            </span>
+                        </template>
+                        <template v-else-if="evt.event_type === 'enter'">
+                            👋 <span class="uname">{{ evt.username }}</span> 进入直播间
+                        </template>
+                        <template v-else-if="evt.event_type === 'like'">
+                            ❤️ <span class="uname">{{ evt.username }}</span> 点了赞
+                        </template>
+                        <template v-else>
+                            📌 {{ evt.event_type }} - {{ evt.username }}
+                        </template>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- 扫码登录弹窗 -->
+        <div class="modal-overlay" v-if="showCookieModal" @click.self="showCookieModal = false">
+            <div class="modal-box">
+                <h2>🔑 登录B站</h2>
+                <p>使用手机 B站 App 扫码登录以获取弹幕数据</p>
+
+                <div class="qrcode-img">
+                    <img v-if="qrImageUrl" :src="qrImageUrl" alt="扫码登录"
+                         style="width: 192px; height: 192px;">
+                    <div v-else class="qrcode-placeholder">
+                        {{ qrLoading ? '加载中...' : '点击下方按钮获取二维码' }}
+                    </div>
+                </div>
+
+                <div class="qr-status" :class="qrStatusClass">
+                    {{ qrStatusText }}
+                </div>
+
+                <button v-if="!qrPolling" class="btn btn-connect" @click="getQRCode"
+                        :disabled="qrLoading" style="padding: 10px 32px; font-size: 1rem;">
+                    {{ qrLoading ? '获取中...' : '📱 获取二维码' }}
+                </button>
+
+                <button v-if="qrPolling" class="modal-close-btn" @click="cancelQRLogin">
+                    取消
+                </button>
+                <button class="modal-close-btn" @click="showCookieModal = false"
+                        style="margin-left: 8px;">关闭</button>
+            </div>
+        </div>
+
+        <footer class="footer">
+            B站直播弹幕实时分析平台 · 数据仅供学习参考
+        </footer>
+    </div>
+
+    <script>
+    const { createApp, ref, computed, onMounted, onUnmounted, watch, nextTick } = Vue;
+
+    // ── ECharts 工具函数 ──
+    function createChart(dom, option) {
+        if (!dom) return null;
+        const chart = echarts.init(dom);
+        chart.setOption(option);
+        return chart;
+    }
+
+    // ── 格式化数字 ──
+    function abbreviate(n) {
+        if (!n && n !== 0) return '-';
+        n = Number(n);
+        if (n >= 10000) return (n / 10000).toFixed(1) + '万';
+        if (n >= 1000) return (n / 1000).toFixed(1) + 'k';
+        return String(n);
+    }
+
+    const app = createApp({
+        setup() {
+            // ── 状态 ──
+            const roomInput = ref('1762765173');
+            const connected = ref(false);
+            const wsConnected = ref(false);
+            const roomInfo = ref({});
+            const liveOnline = ref(0);
+            const liveAttention = ref(0);
+            const startTime = ref(Date.now());
+            const uptime = ref('00:00');
+            const eventFilter = ref('all');
+
+            // 弹幕和事件列表
+            const danmakuList = ref([]);
+            const eventList = ref([]);
+            let dmCounter = 0;
+            let evtCounter = 0;
+
+            // 统计数据
+            const stats = ref({
+                message_count: 0,
+                top_users: [],
+                top_phrases: [],
+                top_keywords: [],
+                density: [],
+            });
+
+            // 图表引用
+            const densityChart = ref(null);
+            const phraseChart = ref(null);
+            const userChart = ref(null);
+            const activeChart = ref(null);
+            const ratioChart = ref(null);
+            const dmStream = ref(null);
+            const evtStream = ref(null);
+            let densityChartInstance = null;
+            let phraseChartInstance = null;
+            let userChartInstance = null;
+            let activeChartInstance = null;
+            let ratioChartInstance = null;
+
+            const bucketOptions = [10, 30, 60, 120, 300, 600];
+            const selectedBucket = ref(60);  // 默认 1 分钟
+
+            // Cookie / 扫码登录
+            const showCookieModal = ref(false);
+            const qrCodeUrl = ref('');
+            const qrKey = ref('');
+            const qrImageUrl = ref('');
+            const qrLoading = ref(false);
+            const qrPolling = ref(false);
+            const qrStatusText = ref('');
+            const qrStatusClass = ref('');
+            let qrPollTimer = null;
+
+            // Cookie 状态
+            const cookieStatus = ref('unknown');  // 'has', 'pending', 'missing'
+
+            const cookieStatusClass = computed(() => {
+                if (cookieStatus.value === 'has') return 'has';
+                if (cookieStatus.value === 'pending') return 'pending';
+                return 'missing';
+            });
+            const cookieLabel = computed(() => {
+                if (cookieStatus.value === 'has') return '已登录';
+                if (cookieStatus.value === 'pending') return '登录中';
+                return '未登录';
+            });
+            const cookieTooltip = computed(() => {
+                if (cookieStatus.value === 'has') return 'B站已登录，点击查看';
+                return 'B站未登录，点击登录以获取弹幕数据';
+            });
+
+            // ── 扫码登录 ──
+            async function getQRCode() {
+                qrLoading.value = true;
+                qrStatusText.value = '正在获取二维码...';
+                qrStatusClass.value = '';
+                try {
+                    const resp = await fetch('/api/cookie/qrcode');
+                    const data = await resp.json();
+                    if (data.ok) {
+                        qrCodeUrl.value = data.url;
+                        qrKey.value = data.key;
+                        // 后端生成二维码图片
+                        qrImageUrl.value = '/api/cookie/qrcode-image?url=' +
+                            encodeURIComponent(data.url);
+                        qrLoading.value = false;
+                        qrPolling.value = true;
+                        qrStatusText.value = '📱 请使用 B站 App 扫码';
+                        cookieStatus.value = 'pending';
+                        startQRPoll();
+                    } else {
+                        qrStatusText.value = '❌ ' + (data.error || '获取失败');
+                        qrStatusClass.value = 'error';
+                        qrLoading.value = false;
+                    }
+                } catch (err) {
+                    qrStatusText.value = '❌ 获取二维码失败: ' + err.message;
+                    qrStatusClass.value = 'error';
+                    qrLoading.value = false;
+                }
+            }
+
+            function startQRPoll() {
+                let attempts = 0;
+                const maxAttempts = 120;  // 2分钟
+                qrPollTimer = setInterval(async () => {
+                    attempts++;
+                    if (attempts > maxAttempts) {
+                        stopQRPoll();
+                        qrStatusText.value = '⌛ 二维码已过期，请重新获取';
+                        qrStatusClass.value = 'error';
+                        qrPolling.value = false;
+                        return;
+                    }
+                    try {
+                        const resp = await fetch(`/api/cookie/poll?key=${qrKey.value}`);
+                        const data = await resp.json();
+                        if (data.status === 'ok') {
+                            stopQRPoll();
+                            qrStatusText.value = '✅ 登录成功！Cookie 已获取';
+                            qrStatusClass.value = 'ok';
+                            cookieStatus.value = 'has';
+                            qrPolling.value = false;
+                            // 重新连接房间
+                            connectRoom();
+                            setTimeout(() => {
+                                showCookieModal.value = false;
+                            }, 1500);
+                        } else if (data.status === 'scanned') {
+                            qrStatusText.value = '📱 已扫码，请在手机上确认';
+                            qrStatusClass.value = 'scanned';
+                        } else if (data.status === 'pending') {
+                            qrStatusText.value = '📱 请使用 B站 App 扫码';
+                            qrStatusClass.value = '';
+                        } else if (data.status === 'expired') {
+                            stopQRPoll();
+                            qrStatusText.value = '⌛ 二维码已过期';
+                            qrStatusClass.value = 'error';
+                            qrPolling.value = false;
+                        } else if (!data.ok) {
+                            qrStatusText.value = '❌ ' + (data.error || '登录失败');
+                            qrStatusClass.value = 'error';
+                            qrPolling.value = false;
+                            stopQRPoll();
+                        }
+                    } catch (err) {
+                        console.error('扫码轮询失败:', err);
+                    }
+                }, 1000);  // 每秒轮询
+            }
+
+            function stopQRPoll() {
+                if (qrPollTimer) {
+                    clearInterval(qrPollTimer);
+                    qrPollTimer = null;
+                }
+            }
+
+            function cancelQRLogin() {
+                stopQRPoll();
+                qrPolling.value = false;
+                qrCodeUrl.value = '';
+                qrKey.value = '';
+                qrImageUrl.value = '';
+                qrStatusText.value = '';
+                qrStatusClass.value = '';
+            }
+
+            // ── 检查 Cookie 状态 ──
+            async function checkCookieStatus() {
+                try {
+                    const resp = await fetch('/api/cookie/status');
+                    const data = await resp.json();
+                    if (data.exists && data.has_login) {
+                        cookieStatus.value = 'has';
+                    } else if (data.exists) {
+                        cookieStatus.value = 'pending';
+                    } else {
+                        cookieStatus.value = 'missing';
+                    }
+                } catch (err) {
+                    cookieStatus.value = 'missing';
+                }
+            }
+
+            // WebSocket
+            let ws = null;
+            let statusTimer = null;
+            let statsTimer = null;
+            let activityTimer = null;
+            let uptimeTimer = null;
+
+            // ── 过滤后的事件 ──
+            const filteredEvents = computed(() => {
+                if (eventFilter.value === 'all') return eventList.value;
+                return eventList.value.filter(e => e.event_type === eventFilter.value);
+            });
+
+            // ── 连接房间 ──
+            async function connectRoom() {
+                const roomId = roomInput.value.trim();
+                if (!roomId) return;
+                try {
+                    const resp = await fetch(`/api/room/${roomId}/connect`, {
+                        method: 'POST'
+                    });
+                    const data = await resp.json();
+                    if (data.status === 'connected' || data.status === 'already_connected') {
+                        connected.value = true;
+                        startTime.value = Date.now();
+                        // 清空前端数据
+                        danmakuList.value = [];
+                        eventList.value = [];
+                        dmCounter = 0;
+                        evtCounter = 0;
+                        fetchStatus();
+                        fetchStats();
+                    }
+                } catch (err) {
+                    console.error('连接失败:', err);
+                }
+            }
+
+            // ── 获取状态 ──
+            async function fetchStatus() {
+                try {
+                    const resp = await fetch('/api/status');
+                    const data = await resp.json();
+                    connected.value = data.running;
+                    roomInfo.value = data.room_info || {};
+                    liveOnline.value = data.room_info?.online || 0;
+                    liveAttention.value = data.room_info?.attention || 0;
+                    if (data.room_id) {
+                        roomInput.value = data.room_id;
+                    }
+                    // 更新 Cookie 状态
+                    if (data.has_login) {
+                        cookieStatus.value = 'has';
+                    } else if (data.has_cookie) {
+                        cookieStatus.value = 'pending';
+                    }
+                } catch (err) {
+                    // 忽略
+                }
+            }
+
+            // ── 获取最近事件 ──
+            async function fetchEvents() {
+                try {
+                    const resp = await fetch('/api/events?limit=50');
+                    const data = await resp.json();
+                    if (data.data && data.data.length > 0) {
+                        eventList.value = data.data.map(e => ({
+                            id: evtCounter++,
+                            event_type: e.event_type,
+                            username: e.username || '',
+                            content: e.content || {},
+                            timestamp: e.timestamp,
+                        }));
+                    }
+                } catch (err) {
+                    // ignore
+                }
+            }
+
+            // ── 获取活跃度和进入人数统计 ──
+            const activityData = ref({ density: [], total_online_avg: 0 });
+            async function fetchActivity() {
+                try {
+                    const resp = await fetch(
+                        `/api/activity?bucket=${selectedBucket.value}`);
+                    const data = await resp.json();
+                    activityData.value = data;
+                    updateActivityCharts();
+                } catch (err) {
+                    // ignore
+                }
+            }
+
+            // ── 更新活跃度图表 ──
+            function updateActivityCharts() {
+                const d = activityData.value.density || [];
+
+                // 进入人数曲线
+                if (activeChartInstance && d.length) {
+                    activeChartInstance.setOption({
+                        xAxis: {
+                            type: 'time',
+                            axisLabel: { color: '#888', fontSize: 9 },
+                            splitLine: { show: false },
+                        },
+                        yAxis: {
+                            type: 'value',
+                            axisLabel: { color: '#888', fontSize: 9 },
+                            splitLine: { lineStyle: { color: '#2a2a44' } },
+                        },
+                        series: [{
+                            name: '进入',
+                            type: 'line',
+                            smooth: true,
+                            symbol: 'none',
+                            data: d.map(p => [p.time * 1000, p.enter]),
+                            lineStyle: { color: '#48dbfb', width: 2 },
+                            areaStyle: {
+                                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                    { offset: 0, color: 'rgba(72,219,251,0.3)' },
+                                    { offset: 1, color: 'rgba(72,219,251,0.01)' },
+                                ]),
+                            },
+                        }, {
+                            name: '活跃',
+                            type: 'line',
+                            smooth: true,
+                            symbol: 'none',
+                            data: d.map(p => [p.time * 1000, p.active]),
+                            lineStyle: { color: '#feca57', width: 2 },
+                            areaStyle: {
+                                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                    { offset: 0, color: 'rgba(254,202,87,0.3)' },
+                                    { offset: 1, color: 'rgba(254,202,87,0.01)' },
+                                ]),
+                            },
+                        }],
+                    });
+                }
+
+                // 活跃比曲线
+                if (ratioChartInstance && d.length) {
+                    ratioChartInstance.setOption({
+                        xAxis: {
+                            type: 'time',
+                            axisLabel: { color: '#888', fontSize: 9 },
+                            splitLine: { show: false },
+                        },
+                        yAxis: {
+                            type: 'value',
+                            axisLabel: { color: '#888', fontSize: 9, formatter: '{value}%' },
+                            splitLine: { lineStyle: { color: '#2a2a44' } },
+                            max: 100,
+                        },
+                        series: [{
+                            type: 'line',
+                            smooth: true,
+                            symbol: 'none',
+                            data: d.map(p => [p.time * 1000, Math.round(p.ratio * 100)]),
+                            lineStyle: { color: '#ff6b6b', width: 2 },
+                            areaStyle: {
+                                color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                    { offset: 0, color: 'rgba(255,107,107,0.3)' },
+                                    { offset: 1, color: 'rgba(255,107,107,0.01)' },
+                                ]),
+                            },
+                        }],
+                    });
+                }
+            }
+
+            // ── 获取统计 ──
+            async function fetchStats() {
+                try {
+                    const resp = await fetch('/api/stats');
+                    const data = await resp.json();
+                    stats.value = data;
+                    updateCharts();
+                } catch (err) {
+                    // 忽略
+                }
+            }
+
+            // ── 更新图表 ──
+            function updateCharts() {
+                // 弹幕密度
+                if (densityChartInstance) {
+                    const d = stats.value.density || [];
+                    densityChartInstance.setOption({
+                        xAxis: {
+                            type: 'time',
+                            axisLabel: { color: '#888', fontSize: 10 },
+                            splitLine: { show: false },
+                        },
+                        yAxis: {
+                            type: 'value',
+                            axisLabel: { color: '#888', fontSize: 10 },
+                            splitLine: { lineStyle: { color: '#2a2a44' } },
+                        },
+                        series: [{
+                            data: d.length ? d.map(p => [p.time * 1000, p.count]) : [],
+                            type: 'bar',
+                            barWidth: '60%',
+                            itemStyle: {
+                                color: d.length
+                                    ? new echarts.graphic.LinearGradient(0, 0, 0, 1, [
+                                        { offset: 0, color: '#ff6b6b' },
+                                        { offset: 1, color: '#ee5a24' },
+                                      ])
+                                    : { color: '#333' },
+                                borderRadius: [2, 2, 0, 0],
+                            },
+                        }],
+                    });
+                }
+
+                // 高频短语
+                if (phraseChartInstance) {
+                    const items = (stats.value.top_phrases || []).slice(0, 10);
+                    phraseChartInstance.setOption({
+                        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+                        grid: { left: 10, right: 40, top: 10, bottom: 10, containLabel: true },
+                        xAxis: {
+                            type: 'value',
+                            axisLabel: { color: '#888', fontSize: 9 },
+                            splitLine: { lineStyle: { color: '#2a2a44' } },
+                        },
+                        yAxis: {
+                            type: 'category',
+                            data: items.length ? items.map(i => i.text.substring(0, 12)).reverse() : ['等待数据...'],
+                            axisLabel: { color: '#ddd', fontSize: 9 },
+                            axisLine: { show: false },
+                            axisTick: { show: false },
+                        },
+                        series: [{
+                            type: 'bar',
+                            data: items.length ? items.map(i => i.count).reverse() : [0],
+                            itemStyle: {
+                                color: items.length
+                                    ? new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+                                        { offset: 0, color: '#feca57' },
+                                        { offset: 1, color: '#ff6b6b' },
+                                      ])
+                                    : { color: '#333' },
+                                borderRadius: [0, 3, 3, 0],
+                            },
+                            label: {
+                                show: items.length > 0,
+                                position: 'right',
+                                color: '#aaa',
+                                fontSize: 9,
+                            },
+                        }],
+                    });
+                }
+
+                // 活跃用户
+                if (userChartInstance) {
+                    const users = (stats.value.top_users || []).slice(0, 10);
+                    userChartInstance.setOption({
+                        tooltip: { trigger: 'axis', axisPointer: { type: 'shadow' } },
+                        grid: { left: 10, right: 40, top: 10, bottom: 10, containLabel: true },
+                        xAxis: {
+                            type: 'value',
+                            axisLabel: { color: '#888', fontSize: 9 },
+                            splitLine: { lineStyle: { color: '#2a2a44' } },
+                        },
+                        yAxis: {
+                            type: 'category',
+                            data: users.length ? users.map(u => u.username.substring(0, 10)).reverse() : ['等待数据...'],
+                            axisLabel: { color: '#ddd', fontSize: 9 },
+                            axisLine: { show: false },
+                            axisTick: { show: false },
+                        },
+                        series: [{
+                            type: 'bar',
+                            data: users.length ? users.map(u => u.count).reverse() : [0],
+                            itemStyle: {
+                                color: users.length
+                                    ? new echarts.graphic.LinearGradient(0, 0, 1, 0, [
+                                        { offset: 0, color: '#48dbfb' },
+                                        { offset: 1, color: '#0abde3' },
+                                      ])
+                                    : { color: '#333' },
+                                borderRadius: [0, 3, 3, 0],
+                            },
+                            label: {
+                                show: users.length > 0,
+                                position: 'right',
+                                color: '#aaa',
+                                fontSize: 9,
+                            },
+                        }],
+                    });
+                }
+            }
+
+            // ── 初始化活跃度图表 ──
+            function initActivityCharts() {
+                if (activeChart.value) {
+                    activeChartInstance = echarts.init(activeChart.value);
+                    activeChartInstance.setOption({
+                        grid: { left: 50, right: 20, top: 30, bottom: 30 },
+                        legend: { data: ['进入', '活跃'], textStyle: { color: '#aaa' } },
+                        xAxis: {
+                            type: 'time',
+                            axisLabel: { color: '#888', fontSize: 9 },
+                            splitLine: { show: false },
+                        },
+                        yAxis: {
+                            type: 'value',
+                            axisLabel: { color: '#888', fontSize: 9 },
+                            splitLine: { lineStyle: { color: '#2a2a44' } },
+                        },
+                        series: [
+                            { name: '进入', type: 'line', smooth: true, symbol: 'none', data: [] },
+                            { name: '活跃', type: 'line', smooth: true, symbol: 'none', data: [] },
+                        ],
+                    });
+                }
+                if (ratioChart.value) {
+                    ratioChartInstance = echarts.init(ratioChart.value);
+                    ratioChartInstance.setOption({
+                        grid: { left: 50, right: 20, top: 20, bottom: 30 },
+                        xAxis: {
+                            type: 'time',
+                            axisLabel: { color: '#888', fontSize: 9 },
+                            splitLine: { show: false },
+                        },
+                        yAxis: {
+                            type: 'value',
+                            axisLabel: { color: '#888', fontSize: 9, formatter: '{value}%' },
+                            splitLine: { lineStyle: { color: '#2a2a44' } },
+                            max: 100,
+                        },
+                        series: [{ type: 'line', smooth: true, symbol: 'none', data: [] }],
+                    });
+                }
+            }
+
+            // ── 初始化图表 ──
+            function initCharts() {
+                // 密度图 - 空占位
+                if (densityChart.value) {
+                    densityChartInstance = echarts.init(densityChart.value);
+                    densityChartInstance.setOption({
+                        grid: { left: 50, right: 20, top: 20, bottom: 30 },
+                        xAxis: {
+                            type: 'time',
+                            axisLabel: { color: '#888', fontSize: 10 },
+                            splitLine: { show: false },
+                        },
+                        yAxis: {
+                            type: 'value',
+                            axisLabel: { color: '#888', fontSize: 10 },
+                            splitLine: { lineStyle: { color: '#2a2a44' } },
+                        },
+                        series: [{ type: 'bar', data: [] }],
+                    });
+                }
+
+                // 短语
+                if (phraseChart.value) {
+                    phraseChartInstance = echarts.init(phraseChart.value);
+                    phraseChartInstance.setOption({
+                        grid: { left: 10, right: 40, top: 10, bottom: 10, containLabel: true },
+                        xAxis: { type: 'value', show: false },
+                        yAxis: { type: 'category', data: [], axisLabel: { color: '#ddd' } },
+                        series: [{ type: 'bar', data: [] }],
+                    });
+                }
+
+                // 用户
+                if (userChart.value) {
+                    userChartInstance = echarts.init(userChart.value);
+                    userChartInstance.setOption({
+                        grid: { left: 10, right: 40, top: 10, bottom: 10, containLabel: true },
+                        xAxis: { type: 'value', show: false },
+                        yAxis: { type: 'category', data: [], axisLabel: { color: '#ddd' } },
+                        series: [{ type: 'bar', data: [] }],
+                    });
+                }
+            }
+
+            // ── 时间格式化 ──
+            function formatTime(ts) {
+                if (!ts) return '';
+                const d = new Date(ts * 1000);
+                return d.toLocaleTimeString('zh-CN', { hour12: false });
+            }
+
+            // ── WebSocket 连接 ──
+            function connectWS() {
+                const protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+                const url = `${protocol}//${location.host}/ws`;
+                ws = new WebSocket(url);
+
+                ws.onopen = () => {
+                    wsConnected.value = true;
+                    console.log('✅ WebSocket 已连接');
+                };
+
+                ws.onmessage = (e) => {
+                    try {
+                        const msg = JSON.parse(e.data);
+                        handleWSMessage(msg);
+                    } catch (err) {
+                        console.error('WS消息解析失败:', err);
+                    }
+                };
+
+                ws.onclose = () => {
+                    wsConnected.value = false;
+                    console.log('❌ WebSocket 断开，5秒后重连');
+                    setTimeout(connectWS, 5000);
+                };
+
+                ws.onerror = (err) => {
+                    console.error('WebSocket 错误:', err);
+                };
+            }
+
+            // ── 处理 WebSocket 消息 ──
+            function handleWSMessage(msg) {
+                const type = msg.type;
+                const data = msg.data || {};
+
+                switch (type) {
+                    case 'danmaku':
+                        dmCounter++;
+                        danmakuList.value.push({
+                            id: dmCounter,
+                            username: data.username || '游客',
+                            text: data.text || '',
+                            time: data.time || Date.now() / 1000,
+                            _type: 'danmaku',
+                        });
+                        // 只保留 200 条
+                        if (danmakuList.value.length > 200) {
+                            danmakuList.value = danmakuList.value.slice(-200);
+                        }
+                        // 自动滚动到底部
+                        nextTick(() => {
+                            if (dmStream.value) {
+                                dmStream.value.scrollTop = dmStream.value.scrollHeight;
+                            }
+                        });
+                        break;
+
+                    case 'gift':
+                    case 'super_chat':
+                    case 'enter':
+                    case 'like':
+                        evtCounter++;
+                        eventList.value.push({
+                            id: evtCounter,
+                            event_type: type,
+                            username: data.username || '',
+                            content: data,
+                            timestamp: Date.now() / 1000,
+                        });
+                        if (eventList.value.length > 200) {
+                            eventList.value = eventList.value.slice(-200);
+                        }
+                        nextTick(() => {
+                            if (evtStream.value) {
+                                evtStream.value.scrollTop = evtStream.value.scrollHeight;
+                            }
+                        });
+                        // 送礼物也加到弹幕流
+                        if (type === 'gift' || type === 'super_chat') {
+                            if (type === 'gift') {
+                                dmCounter++;
+                                danmakuList.value.push({
+                                    id: 'gift-' + dmCounter,
+                                    username: data.username || '',
+                                    text: `🎁 送了 ${data.num || 1} 个 ${data.gift_name || '礼物'}`,
+                                    time: data.time || Date.now() / 1000,
+                                    _type: 'gift',
+                                });
+                            } else {
+                                dmCounter++;
+                                danmakuList.value.push({
+                                    id: 'sc-' + dmCounter,
+                                    username: data.username || '',
+                                    text: `⭐ SC: ${data.text || ''}`,
+                                    time: data.time || Date.now() / 1000,
+                                    _type: 'sc',
+                                });
+                            }
+                        } else if (type === 'enter') {
+                            dmCounter++;
+                            danmakuList.value.push({
+                                id: 'enter-' + dmCounter,
+                                username: data.username || '',
+                                text: '👋 进入直播间',
+                                time: data.time || Date.now() / 1000,
+                                _type: 'enter',
+                            });
+                        }
+                        break;
+
+                    case 'metrics':
+                        liveOnline.value = data.online || 0;
+                        liveAttention.value = data.attention || 0;
+                        if (data.title) {
+                            roomInfo.value.title = data.title;
+                        }
+                        if (data.area_name) {
+                            roomInfo.value.area_name = data.area_name;
+                        }
+                        break;
+
+                    case 'status':
+                        if (data.status === 'connected' && data.room_id) {
+                            connected.value = true;
+                            roomInput.value = data.room_id;
+                            startTime.value = Date.now();
+                            fetchStats();
+                        }
+                        break;
+                }
+            }
+
+            // ── 导出数据 ──
+            async function exportData() {
+                const roomId = roomInput.value;
+                const url = `/api/export?room_id=${roomId}&fmt=csv`;
+                try {
+                    const resp = await fetch(url);
+                    const blob = await resp.blob();
+                    const a = document.createElement('a');
+                    a.href = URL.createObjectURL(blob);
+                    a.download = `danmaku_${roomId}_${new Date().toISOString().slice(0,10)}.csv`;
+                    a.click();
+                    URL.revokeObjectURL(a.href);
+                } catch (err) {
+                    console.error('导出失败:', err);
+                }
+            }
+
+            // ── 清空数据 ──
+            async function clearData() {
+                danmakuList.value = [];
+                eventList.value = [];
+                dmCounter = 0;
+                evtCounter = 0;
+                stats.value = {
+                    message_count: 0,
+                    top_users: [],
+                    top_phrases: [],
+                    top_keywords: [],
+                    density: [],
+                };
+                updateCharts();
+            }
+
+            // ── 定时器 ──
+            function startTimers() {
+                statusTimer = setInterval(fetchStatus, 5000);
+                statsTimer = setInterval(fetchStats, 10000);
+                activityTimer = setInterval(fetchActivity, 15000);
+                uptimeTimer = setInterval(() => {
+                    const elapsed = Math.floor((Date.now() - startTime.value) / 1000);
+                    const m = String(Math.floor(elapsed / 60)).padStart(2, '0');
+                    const s = String(elapsed % 60).padStart(2, '0');
+                    uptime.value = `${m}:${s}`;
+                }, 1000);
+            }
+
+            // ── 窗口大小变化 ──
+            function handleResize() {
+                densityChartInstance?.resize();
+                phraseChartInstance?.resize();
+                userChartInstance?.resize();
+                activeChartInstance?.resize();
+                ratioChartInstance?.resize();
+            }
+
+            // ── 生命周期 ──
+            onMounted(() => {
+                checkCookieStatus();
+                fetchStatus();
+                fetchStats();
+                fetchEvents();
+                fetchActivity();
+                connectWS();
+                startTimers();
+
+                nextTick(() => {
+                    initCharts();
+                    initActivityCharts();
+                });
+
+                window.addEventListener('resize', handleResize);
+            });
+
+            onUnmounted(() => {
+                if (statusTimer) clearInterval(statusTimer);
+                if (statsTimer) clearInterval(statsTimer);
+                if (activityTimer) clearInterval(activityTimer);
+                if (uptimeTimer) clearInterval(uptimeTimer);
+                if (ws) ws.close();
+                stopQRPoll();
+                window.removeEventListener('resize', handleResize);
+                densityChartInstance?.dispose();
+                phraseChartInstance?.dispose();
+                userChartInstance?.dispose();
+                activeChartInstance?.dispose();
+                ratioChartInstance?.dispose();
+            });
+
+            return {
+                roomInput,
+                connected,
+                roomInfo,
+                liveOnline,
+                liveAttention,
+                uptime,
+                stats,
+                danmakuList,
+                eventList,
+                eventFilter,
+                filteredEvents,
+                densityChart,
+                phraseChart,
+                userChart,
+                activeChart,
+                ratioChart,
+                selectedBucket,
+                bucketOptions,
+                activityData,
+                dmStream,
+                evtStream,
+                showCookieModal,
+                qrCodeUrl,
+                qrKey,
+                qrImageUrl,
+                qrLoading,
+                qrPolling,
+                qrStatusText,
+                qrStatusClass,
+                cookieStatusClass,
+                cookieLabel,
+                cookieTooltip,
+                connectRoom,
+                fetchStatus,
+                fetchStats,
+                fetchEvents,
+                formatTime,
+                clearData,
+                exportData,
+                getQRCode,
+                cancelQRLogin,
+                checkCookieStatus,
+            };
+        },
+        filters: {
+            abbreviate,
+        },
+    });
+
+    // 全局过滤器
+    app.config.globalProperties.$filters = { abbreviate };
+    app.mount('#app');
+    </script>
+</body>
+</html>

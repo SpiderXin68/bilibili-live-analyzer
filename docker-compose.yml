@@ -1,0 +1,16 @@
+version: '3.8'
+
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: danmu-backend
+    ports:
+      - "8000:8000"
+    volumes:
+      - danmu_data:/app/data
+    restart: unless-stopped
+
+volumes:
+  danmu_data:
