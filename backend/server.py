@@ -25,6 +25,11 @@ from collector import BiliLiveCollector
 from storage import Storage
 from config import settings
 
+# 强制 bilibili-api 使用 aiohttp 而非 curl_cffi
+# curl_cffi 在 Python 3.14 下 C 扩展层兼容性不佳，会段错误
+import bilibili_api.utils.network as bili_net
+bili_net.select_client("aiohttp")
+
 logger = logging.getLogger(__name__)
 
 # ── 全局实例 ──
