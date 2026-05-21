@@ -6,7 +6,7 @@
 
 | 层级 | 技术 |
 |------|------|
-| 采集 | Python + aiohttp + B站直播 WebSocket 协议 |
+| 采集 | Python + bilibili-api-python（封装 aiohttp + WebSocket + Brotli 解压） |
 | 存储 | SQLite (零配置，无需 Redis) |
 | 后端 | FastAPI + WebSocket 实时推送 |
 | 前端 | Vue 3 + ECharts (CDN 加载，无构建步骤) |

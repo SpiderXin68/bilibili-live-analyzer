@@ -11,12 +11,14 @@ import os
 import time
 from typing import Optional, Callable, Awaitable
 
+import aiohttp
 from bilibili_api import Credential
 from bilibili_api.live import LiveDanmaku
 
 logger = logging.getLogger(__name__)
 
-# Cookie 文件管理
+# ── Cookie 文件管理 ──
+
 
 def _find_cookie_file() -> Optional[str]:
     """自动查找 Cookie 文件"""
@@ -74,8 +76,8 @@ def _load_credential() -> Optional[Credential]:
 
 def _save_cookie_header(cookie_str: str) -> str:
     """保存 Cookie 字符串到文件"""
-    from config import ROOT_DIR
-    path = ROOT_DIR / ".bilibili_cookie.txt"
+    from config import settings
+    path = settings.ROOT_DIR / ".bilibili_cookie.txt"
     with open(path, "w") as f:
         f.write(cookie_str.strip() + "\n")
     logger.info(f"💾 Cookie 已保存到: {path}")
@@ -83,10 +85,18 @@ def _save_cookie_header(cookie_str: str) -> str:
 
 
 class BiliLiveCollector:
-    """B站直播采集器 - 基于 bilibili-api"""
+    """B站直播采集器 - 基于 bilibili-api
 
-    def __init__(self, room_id: str):
+    使用外部传入的 aiohttp.ClientSession 避免每次 get_room_info 都
+    重新建立 TCP 连接（三次握手/四次挥手 → Session 复用）。
+    """
+
+    def __init__(self, room_id: str,
+                 session: Optional[aiohttp.ClientSession] = None):
         self.room_id = int(room_id)
+        # 优先使用外部传入的长连接 session，节省 TCP 握手开销
+        self._http_session = session
+        self._owns_session = session is None
         self._running = False
         self._dm: Optional[LiveDanmaku] = None
         self._task: Optional[asyncio.Task] = None
@@ -101,28 +111,34 @@ class BiliLiveCollector:
         self.on_connected: Optional[Callable[[], Awaitable[None]]] = None
         self.on_disconnected: Optional[Callable[[], Awaitable[None]]] = None
 
+    async def _get_session(self) -> aiohttp.ClientSession:
+        """获取 aiohttp session（按需创建，外部传入则复用）"""
+        if self._http_session is None or self._http_session.closed:
+            self._http_session = aiohttp.ClientSession()
+            self._owns_session = True
+        return self._http_session
+
     async def get_room_info(self) -> dict:
-        """获取房间信息"""
+        """获取房间信息（复用 Session，避免频繁 TCP 握手）"""
         try:
-            import aiohttp
             from bilibili_api.live import LiveRoom
             cred = _load_credential()
             room = LiveRoom(self.room_id, cred) if cred else LiveRoom(self.room_id)
             info = await room.get_room_info()
             room_info = info.get("room_info", {})
 
-            # 粉丝数需要单独从旧 API 获取
+            # 粉丝数需要单独从旧 API 获取 — 复用长连接 session
             attention = 0
             try:
-                async with aiohttp.ClientSession() as session:
-                    async with session.get(
-                        "https://api.live.bilibili.com/room/v1/Room/get_info",
-                        params={"room_id": self.room_id},
-                        headers={"User-Agent": "Mozilla/5.0"},
-                    ) as resp:
-                        data = await resp.json()
-                        if data.get("code") == 0:
-                            attention = data["data"].get("attention", 0)
+                session = await self._get_session()
+                async with session.get(
+                    "https://api.live.bilibili.com/room/v1/Room/get_info",
+                    params={"room_id": self.room_id},
+                    headers={"User-Agent": "Mozilla/5.0"},
+                ) as resp:
+                    data = await resp.json()
+                    if data.get("code") == 0:
+                        attention = data["data"].get("attention", 0)
             except Exception:
                 pass
 
@@ -143,7 +159,11 @@ class BiliLiveCollector:
         cred = _load_credential()
         if not cred:
             logger.error("❌ 未找到 Cookie，请先扫码登录")
-            return
+            if self.on_disconnected:
+                await self.on_disconnected()
+            raise RuntimeError(
+                "Missing Bilibili Credentials - 请先导出 Cookie 后重试"
+            )
 
         self._dm = LiveDanmaku(self.room_id, credential=cred, debug=False)
 
@@ -233,10 +253,12 @@ class BiliLiveCollector:
 
         try:
             logger.info(f"🔗 开始构建连接 {self.room_id}...")
-            # 连接前触发 on_connected 事件通知上层准备就绪
-            if self.on_connected:
-                asyncio.create_task(self.on_connected())
+            # ✅ 先建立 WebSocket 连接，成功后再触发 on_connected
+            #    避免竞态条件：上层还没连上就收到 connected 通知
             await self._dm.connect()
+            logger.info(f"✅ 成功连接直播间 {self.room_id}")
+            if self.on_connected:
+                await self.on_connected()
             logger.info(f"💡 直播间 {self.room_id} 连接已正常关闭")
         except Exception as e:
             logger.error(f"采集器运行时异常: {e}")
@@ -246,7 +268,8 @@ class BiliLiveCollector:
         finally:
             self._running = False
             try:
-                await self._dm.disconnect()
+                if self._dm:
+                    await self._dm.disconnect()
             except Exception:
                 pass
 
@@ -262,6 +285,9 @@ class BiliLiveCollector:
             logger.error(f"采集器已停止: {e}")
         finally:
             self._running = False
+            # 如果本实例自建了 session，关闭时一并清理
+            if self._owns_session and self._http_session:
+                await self._http_session.close()
 
     async def stop(self):
         """停止采集器"""
@@ -273,4 +299,6 @@ class BiliLiveCollector:
                 pass
         if self._task:
             self._task.cancel()
+        if self._owns_session and self._http_session:
+            await self._http_session.close()
         logger.info(f"🛑 已断开房间 {self.room_id}")

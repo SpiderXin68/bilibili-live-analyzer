@@ -18,7 +18,7 @@ from fastapi.responses import HTMLResponse
 
 from collector import BiliLiveCollector
 from storage import Storage
-from config import DEFAULT_ROOM_ID, SERVER_HOST, SERVER_PORT, KEYWORDS
+from config import settings
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +28,9 @@ current_collector: Optional[BiliLiveCollector] = None
 collector_task: Optional[asyncio.Task] = None
 metrics_task: Optional[asyncio.Task] = None
 broadcast_task: Optional[asyncio.Task] = None
+
+# 全局 aiohttp ClientSession（应用生命周期管理，避免频繁 TCP 握手）
+http_session: Optional[aiohttp.ClientSession] = None
 
 # WebSocket 连接池
 frontend_connections: set = set()
@@ -50,7 +53,7 @@ async def record_danmaku(data: dict):
     """保存弹幕并广播"""
     await storage.add_message(
         room_id=str(current_collector.room_id) if current_collector
-        else DEFAULT_ROOM_ID,
+        else settings.DEFAULT_ROOM_ID,
         uid=data.get("uid", 0),
         username=data.get("username", ""),
         text=data.get("text", ""),
@@ -71,7 +74,7 @@ async def record_gift(data: dict):
     """保存礼物并广播"""
     await storage.add_event(
         room_id=str(current_collector.room_id) if current_collector
-        else DEFAULT_ROOM_ID,
+        else settings.DEFAULT_ROOM_ID,
         event_type="gift",
         uid=data.get("uid", 0),
         username=data.get("username", ""),
@@ -92,7 +95,7 @@ async def record_super_chat(data: dict):
     """保存 SC 并广播"""
     await storage.add_event(
         room_id=str(current_collector.room_id) if current_collector
-        else DEFAULT_ROOM_ID,
+        else settings.DEFAULT_ROOM_ID,
         event_type="super_chat",
         uid=data.get("uid", 0),
         username=data.get("username", ""),
@@ -112,7 +115,7 @@ async def record_like(data: dict):
     """保存点赞并广播"""
     await storage.add_event(
         room_id=str(current_collector.room_id) if current_collector
-        else DEFAULT_ROOM_ID,
+        else settings.DEFAULT_ROOM_ID,
         event_type="like",
         uid=data.get("uid", 0),
         username=data.get("username", ""),
@@ -130,7 +133,7 @@ async def record_enter(data: dict):
     """保存进入并广播"""
     await storage.add_event(
         room_id=str(current_collector.room_id) if current_collector
-        else DEFAULT_ROOM_ID,
+        else settings.DEFAULT_ROOM_ID,
         event_type="enter",
         uid=data.get("uid", 0),
         username=data.get("username", ""),
@@ -166,8 +169,8 @@ async def start_collector(room_id: str):
             pass
         metrics_task = None
 
-    # 创建新采集器
-    current_collector = BiliLiveCollector(room_id)
+    # 创建新采集器 → 注入全局 http_session 复用 TCP 连接
+    current_collector = BiliLiveCollector(room_id, session=http_session)
 
     # 注册回调
     current_collector.on_danmaku = record_danmaku
@@ -238,12 +241,19 @@ async def collect_metrics_periodically(room_id: str):
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """生命周期"""
+    global http_session
+
     logger.info("🚀 启动服务...")
+
+    # 创建全局 aiohttp ClientSession（整个应用共享一个）
+    http_session = aiohttp.ClientSession()
+    logger.info("🔌 全局 HTTP Session 已创建")
+
     await storage.init()
 
     # 自动启动默认房间
-    logger.info(f"📺 自动连接房间: {DEFAULT_ROOM_ID}")
-    await start_collector(DEFAULT_ROOM_ID)
+    logger.info(f"📺 自动连接房间: {settings.DEFAULT_ROOM_ID}")
+    await start_collector(settings.DEFAULT_ROOM_ID)
 
     yield
 
@@ -255,6 +265,11 @@ async def lifespan(app: FastAPI):
     if metrics_task:
         metrics_task.cancel()
     await storage.close()
+
+    # 清理全局 HTTP Session
+    if http_session and not http_session.closed:
+        await http_session.close()
+        logger.info("🔌 全局 HTTP Session 已关闭")
 
 
 app = FastAPI(
@@ -276,8 +291,7 @@ app.add_middleware(
 # ── 静态文件 ──
 
 from fastapi.staticfiles import StaticFiles
-from config import ROOT_DIR
-static_dir = ROOT_DIR / "backend" / "static"
+static_dir = settings.ROOT_DIR / "backend" / "static"
 if static_dir.exists():
     app.mount("/static", StaticFiles(directory=str(static_dir)), name="static")
 
@@ -287,8 +301,7 @@ if static_dir.exists():
 @app.get("/", response_class=HTMLResponse)
 async def index():
     """前端主页面"""
-    from config import ROOT_DIR
-    html_path = ROOT_DIR / "frontend" / "index.html"
+    html_path = settings.ROOT_DIR / "frontend" / "index.html"
     if not html_path.exists():
         return "<h1>前端文件未找到</h1><p>请确保 frontend/index.html 存在</p>"
     with open(html_path, "r", encoding="utf-8") as f:
@@ -336,25 +349,26 @@ async def cookie_qrcode():
     """
     global _scan_qrcode_key
     try:
-        async with aiohttp.ClientSession(headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                          "AppleWebKit/537.36 (KHTML, like Gecko) "
-                          "Chrome/131.0.0.0 Safari/537.36",
-        }) as session:
-            async with session.get(
-                "https://passport.bilibili.com/x/passport-login/web/qrcode/generate",
-                params={"source": "main-fe-header"},
-            ) as resp:
-                data = await resp.json()
-                if data.get("code") != 0:
-                    return {"ok": False, "error": data.get("message", "生成二维码失败")}
-                result = data["data"]
-                _scan_qrcode_key = result["qrcode_key"]
-                return {
-                    "ok": True,
-                    "url": result["url"],
-                    "key": result["qrcode_key"],
-                }
+        session = http_session  # 复用全局 session
+        async with session.get(
+            "https://passport.bilibili.com/x/passport-login/web/qrcode/generate",
+            params={"source": "main-fe-header"},
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                              "AppleWebKit/537.36 (KHTML, like Gecko) "
+                              "Chrome/131.0.0.0 Safari/537.36",
+            },
+        ) as resp:
+            data = await resp.json()
+            if data.get("code") != 0:
+                return {"ok": False, "error": data.get("message", "生成二维码失败")}
+            result = data["data"]
+            _scan_qrcode_key = result["qrcode_key"]
+            return {
+                "ok": True,
+                "url": result["url"],
+                "key": result["qrcode_key"],
+            }
     except Exception as e:
         logger.error(f"生成二维码失败: {e}")
         return {"ok": False, "error": str(e)}
@@ -368,65 +382,66 @@ async def cookie_poll(key: str = Query(...)):
     """
     from collector import _save_cookie_header
     try:
-        async with aiohttp.ClientSession(headers={
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                          "AppleWebKit/537.36 (KHTML, like Gecko) "
-                          "Chrome/131.0.0.0 Safari/537.36",
-        }) as session:
-            async with session.get(
-                "https://passport.bilibili.com/x/passport-login/web/qrcode/poll",
-                params={"qrcode_key": key},
-            ) as resp:
-                data = await resp.json()
-                code = data.get("code", -1)
-                logger.info(f"扫码轮询: code={code}, data={data}")
+        session = http_session  # 复用全局 session
+        async with session.get(
+            "https://passport.bilibili.com/x/passport-login/web/qrcode/poll",
+            params={"qrcode_key": key},
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                              "AppleWebKit/537.36 (KHTML, like Gecko) "
+                              "Chrome/131.0.0.0 Safari/537.36",
+            },
+        ) as resp:
+            data = await resp.json()
+            code = data.get("code", -1)
+            logger.info(f"扫码轮询: code={code}, data={data}")
 
-                if code == 0:
-                    # 登录成功！捕获 Set-Cookie
-                    set_cookies = resp.headers.getall("Set-Cookie", [])
-                    if set_cookies:
-                        cookie_parts = []
-                        for sc in set_cookies:
-                            parts = sc.split(";")[0]
-                            if "=" in parts and "Path=" not in parts:
-                                cookie_parts.append(parts)
-                        cookie_str = "; ".join(cookie_parts)
+            if code == 0:
+                # 登录成功！捕获 Set-Cookie
+                set_cookies = resp.headers.getall("Set-Cookie", [])
+                if set_cookies:
+                    cookie_parts = []
+                    for sc in set_cookies:
+                        parts = sc.split(";")[0]
+                        if "=" in parts and "Path=" not in parts:
+                            cookie_parts.append(parts)
+                    cookie_str = "; ".join(cookie_parts)
 
-                        # 保存到文件
-                        _save_cookie_header(cookie_str)
-                        logger.info(f"✅ 扫码登录成功，Cookie 已保存")
+                    # 保存到文件
+                    _save_cookie_header(cookie_str)
+                    logger.info(f"✅ 扫码登录成功，Cookie 已保存")
 
-                        # 自动重新连接采集器
-                        room_id = current_collector.room_id \
-                            if current_collector else DEFAULT_ROOM_ID
-                        await start_collector(room_id)
+                    # 自动重新连接采集器
+                    room_id = current_collector.room_id \
+                        if current_collector else settings.DEFAULT_ROOM_ID
+                    await start_collector(room_id)
 
-                        return {
-                            "ok": True,
-                            "status": "ok",
-                            "message": "登录成功！正在连接弹幕...",
-                        }
-                    else:
-                        logger.warning("Set-Cookie 为空")
-                        return {
-                            "ok": True,
-                            "status": "partial",
-                            "message": "登录成功但 Cookie 不完整，请手动导出",
-                        }
-
-                elif code == 86038:
-                    # 二维码已失效
-                    return {"ok": False, "status": "expired",
-                            "message": "二维码已失效，请重新获取"}
-                elif code == 86090:
-                    # 已扫码但未确认
-                    return {"ok": True, "status": "scanned",
-                            "message": "已扫码，请在手机上确认"}
+                    return {
+                        "ok": True,
+                        "status": "ok",
+                        "message": "登录成功！正在连接弹幕...",
+                    }
                 else:
-                    # 等待扫码
-                    return {"ok": True, "status": "pending",
-                            "message": "等待扫码...",
-                            "code": code}
+                    logger.warning("Set-Cookie 为空")
+                    return {
+                        "ok": True,
+                        "status": "partial",
+                        "message": "登录成功但 Cookie 不完整，请手动导出",
+                    }
+
+            elif code == 86038:
+                # 二维码已失效
+                return {"ok": False, "status": "expired",
+                        "message": "二维码已失效，请重新获取"}
+            elif code == 86090:
+                # 已扫码但未确认
+                return {"ok": True, "status": "scanned",
+                        "message": "已扫码，请在手机上确认"}
+            else:
+                # 等待扫码
+                return {"ok": True, "status": "pending",
+                        "message": "等待扫码...",
+                        "code": code}
     except Exception as e:
         logger.error(f"扫码轮询失败: {e}")
         return {"ok": False, "error": str(e)}
@@ -436,7 +451,6 @@ async def cookie_poll(key: str = Query(...)):
 async def cookie_status():
     """检查 Cookie 状态"""
     from collector import _find_cookie_file, _load_cookie_header
-    from config import ROOT_DIR
 
     path = _find_cookie_file()
     if path:
@@ -456,9 +470,9 @@ async def cookie_status():
 @app.get("/api/status")
 async def api_status():
     """服务状态"""
-    room_id = current_collector.room_id if current_collector else None
-    # 检查是否已登录（有 Cookie 文件）
     from collector import _find_cookie_file, _load_cookie_header
+
+    room_id = current_collector.room_id if current_collector else None
     has_cookie = bool(_find_cookie_file())
     has_login = False
     if has_cookie:
@@ -490,7 +504,7 @@ async def api_status():
 @app.get("/api/room/{room_id}")
 async def api_room_info(room_id: str):
     """获取指定房间信息"""
-    collector = BiliLiveCollector(room_id)
+    collector = BiliLiveCollector(room_id, session=http_session)
     info = await collector.get_room_info()
     return {"room_id": room_id, "data": info}
 
@@ -515,7 +529,7 @@ async def api_disconnect():
 @app.get("/api/danmaku")
 async def api_danmaku(room_id: str = None, limit: int = 100):
     """获取弹幕历史"""
-    rid = room_id or DEFAULT_ROOM_ID
+    rid = room_id or settings.DEFAULT_ROOM_ID
     return {"data": await storage.get_recent_messages(rid, limit=limit)}
 
 
@@ -523,7 +537,7 @@ async def api_danmaku(room_id: str = None, limit: int = 100):
 async def api_events(room_id: str = None, event_type: str = None,
                      limit: int = 50):
     """获取事件列表"""
-    rid = room_id or DEFAULT_ROOM_ID
+    rid = room_id or settings.DEFAULT_ROOM_ID
     return {"data": await storage.get_recent_events(
         rid, event_type=event_type, limit=limit)}
 
@@ -531,21 +545,21 @@ async def api_events(room_id: str = None, event_type: str = None,
 @app.get("/api/event-distribution")
 async def api_event_distribution(room_id: str = None, since: float = 0):
     """事件分布"""
-    rid = room_id or DEFAULT_ROOM_ID
+    rid = room_id or settings.DEFAULT_ROOM_ID
     return {"data": await storage.get_event_distribution(rid, since=since)}
 
 
 @app.get("/api/metrics")
 async def api_metrics(room_id: str = None, since: float = 0):
     """房间指标时序"""
-    rid = room_id or DEFAULT_ROOM_ID
+    rid = room_id or settings.DEFAULT_ROOM_ID
     return {"data": await storage.get_metrics(rid, since=since)}
 
 
 @app.get("/api/stats")
 async def api_stats(room_id: str = None, bucket: int = 60):
     """聚合统计（6路并发查询，总耗时 = 最慢的单一路径）"""
-    rid = room_id or DEFAULT_ROOM_ID
+    rid = room_id or settings.DEFAULT_ROOM_ID
     since = time.time() - 3600  # 最近 1 小时
 
     results = await asyncio.gather(
@@ -580,7 +594,7 @@ async def api_export(room_id: str = None,
                      fmt: str = "json"):
     """导出弹幕数据"""
     from fastapi.responses import PlainTextResponse
-    rid = room_id or DEFAULT_ROOM_ID
+    rid = room_id or settings.DEFAULT_ROOM_ID
     since_val = since or (time.time() - 3600)
     data = await storage.get_export_data(rid, since=since_val,
                                          until=until or time.time())
@@ -607,7 +621,7 @@ async def api_export(room_id: str = None,
 @app.get("/api/activity")
 async def api_activity(room_id: str = None, bucket: int = 60):
     """活跃度和未进入人数统计，bucket=采样间隔(秒)"""
-    rid = room_id or DEFAULT_ROOM_ID
+    rid = room_id or settings.DEFAULT_ROOM_ID
     since = time.time() - 3600  # 最近 1 小时
 
     data = await storage.get_active_users_density(
@@ -664,8 +678,8 @@ if __name__ == "__main__":
     import uvicorn
     uvicorn.run(
         "server:app",
-        host=SERVER_HOST,
-        port=SERVER_PORT,
+        host=settings.SERVER_HOST,
+        port=settings.SERVER_PORT,
         reload=False,
         log_level="info",
     )

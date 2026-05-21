@@ -24,7 +24,7 @@ logging.getLogger("aiohttp").setLevel(logging.WARNING)
 logging.getLogger("aiosqlite").setLevel(logging.WARNING)
 
 from server import app, SERVER_HOST, SERVER_PORT
-from config import DEFAULT_ROOM_ID
+from config import settings
 
 
 def main():
@@ -34,14 +34,16 @@ def main():
                         help=f"监听地址 (默认: {SERVER_HOST})")
     parser.add_argument("--port", type=int, default=SERVER_PORT,
                         help=f"监听端口 (默认: {SERVER_PORT})")
-    parser.add_argument("--room", type=str, default=DEFAULT_ROOM_ID,
-                        help=f"默认直播间 ID (默认: {DEFAULT_ROOM_ID})")
+    parser.add_argument("--room", type=str, default=None,
+                        help="默认直播间 ID (覆盖 config.py)")
     parser.add_argument("--debug", action="store_true",
                         help="调试模式 (自动重载)")
     args = parser.parse_args()
 
-    # 通过环境变量传递 --room 参数给 config.py
-    os.environ["DEFAULT_ROOM_ID"] = args.room
+    # 通过显式的 settings 对象注入运行时参数，而非修改 os.environ
+    # ✅ 避免隐式副作用，利于测试和并发安全
+    if args.room:
+        settings.DEFAULT_ROOM_ID = args.room
 
     import uvicorn
     uvicorn.run(
