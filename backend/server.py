@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 storage = Storage()
 current_collector: Optional[BiliLiveCollector] = None
 collector_task: Optional[asyncio.Task] = None
+metrics_task: Optional[asyncio.Task] = None
 broadcast_task: Optional[asyncio.Task] = None
 
 # WebSocket 连接池
@@ -33,15 +34,16 @@ frontend_connections: set = set()
 
 
 async def broadcast(data: dict):
-    """向所有前端广播消息"""
+    """向所有前端广播消息（使用 list() 防止并发修改异常）"""
     msg = json.dumps(data, ensure_ascii=False)
     dead = set()
-    for ws in frontend_connections:
+    for ws in list(frontend_connections):
         try:
             await ws.send_text(msg)
         except Exception:
             dead.add(ws)
-    frontend_connections.difference_update(dead)
+    if dead:
+        frontend_connections.difference_update(dead)
 
 
 async def record_danmaku(data: dict):
@@ -144,7 +146,7 @@ async def record_enter(data: dict):
 
 async def start_collector(room_id: str):
     """启动/切换采集器"""
-    global current_collector, collector_task
+    global current_collector, collector_task, metrics_task
 
     # 停止当前采集器
     if current_collector:
@@ -155,6 +157,14 @@ async def start_collector(room_id: str):
                 await collector_task
             except asyncio.CancelledError:
                 pass
+    # 终止旧指标采集任务，防止泄漏和数据污染
+    if metrics_task:
+        metrics_task.cancel()
+        try:
+            await metrics_task
+        except asyncio.CancelledError:
+            pass
+        metrics_task = None
 
     # 创建新采集器
     current_collector = BiliLiveCollector(room_id)
@@ -178,8 +188,8 @@ async def start_collector(room_id: str):
 
     collector_task = asyncio.create_task(current_collector.run())
 
-    # 同时启动房间指标采集
-    asyncio.create_task(collect_metrics_periodically(room_id))
+    # 启动房间指标采集（保存句柄防止泄漏）
+    metrics_task = asyncio.create_task(collect_metrics_periodically(room_id))
 
     return current_collector
 
@@ -240,6 +250,10 @@ async def lifespan(app: FastAPI):
     logger.info("🛑 关闭服务...")
     if current_collector:
         await current_collector.stop()
+    if collector_task:
+        collector_task.cancel()
+    if metrics_task:
+        metrics_task.cancel()
     await storage.close()
 
 
@@ -530,17 +544,20 @@ async def api_metrics(room_id: str = None, since: float = 0):
 
 @app.get("/api/stats")
 async def api_stats(room_id: str = None, bucket: int = 60):
-    """聚合统计"""
+    """聚合统计（6路并发查询，总耗时 = 最慢的单一路径）"""
     rid = room_id or DEFAULT_ROOM_ID
     since = time.time() - 3600  # 最近 1 小时
 
-    total = await storage.get_total_interactions(rid, since=since)
-    top_users = await storage.get_top_users(rid, since=since, top_n=20)
-    top_phrases = await storage.get_top_phrases(rid, since=since, top_n=20)
-    top_keywords = await storage.get_top_keywords(rid, since=since, top_n=30)
-    density = await storage.get_danmaku_density(rid, since=since,
-                                                bucket_seconds=bucket)
-    events = await storage.get_event_distribution(rid, since=since)
+    results = await asyncio.gather(
+        storage.get_total_interactions(rid, since=since),
+        storage.get_top_users(rid, since=since, top_n=20),
+        storage.get_top_phrases(rid, since=since, top_n=20),
+        storage.get_top_keywords(rid, since=since, top_n=30),
+        storage.get_danmaku_density(rid, since=since,
+                                     bucket_seconds=bucket),
+        storage.get_event_distribution(rid, since=since),
+    )
+    total, top_users, top_phrases, top_keywords, density, events = results
 
     return {
         "room_id": rid,

@@ -232,22 +232,19 @@ class BiliLiveCollector:
                 await self.on_popularity(popularity)
 
         try:
-            logger.info(f"🔗 连接直播间 {self.room_id}...")
-            await self._dm.connect()
-            logger.info(f"✅ 成功连接直播间 {self.room_id}")
+            logger.info(f"🔗 开始构建连接 {self.room_id}...")
+            # 连接前触发 on_connected 事件通知上层准备就绪
             if self.on_connected:
-                await self.on_connected()
-
-            # 连接成功后保持运行
-            while self._running:
-                await asyncio.sleep(1)
-
+                asyncio.create_task(self.on_connected())
+            await self._dm.connect()
+            logger.info(f"💡 直播间 {self.room_id} 连接已正常关闭")
         except Exception as e:
-            logger.error(f"采集器错误: {e}")
+            logger.error(f"采集器运行时异常: {e}")
             if self.on_disconnected:
                 await self.on_disconnected()
             raise
         finally:
+            self._running = False
             try:
                 await self._dm.disconnect()
             except Exception:

@@ -14,8 +14,8 @@ DATA_DIR.mkdir(exist_ok=True)
 # SQLite 数据库
 DB_PATH = str(DATA_DIR / "live_analytics.db")
 
-# 默认直播间
-DEFAULT_ROOM_ID = "1762765173"
+# 默认直播间（优先读取环境变量，支持 --room 命令行覆盖）
+DEFAULT_ROOM_ID = os.environ.get("DEFAULT_ROOM_ID", "23255738")
 
 # Bilibili API
 BILI_API_GET_DANMU_INFO = "https://api.live.bilibili.com/xlive/web-room/v1/index/getDanmuInfo"

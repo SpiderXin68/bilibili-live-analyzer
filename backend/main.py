@@ -40,6 +40,9 @@ def main():
                         help="调试模式 (自动重载)")
     args = parser.parse_args()
 
+    # 通过环境变量传递 --room 参数给 config.py
+    os.environ["DEFAULT_ROOM_ID"] = args.room
+
     import uvicorn
     uvicorn.run(
         "server:app",

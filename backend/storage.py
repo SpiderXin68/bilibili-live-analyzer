@@ -15,6 +15,24 @@ from config import DB_PATH
 logger = logging.getLogger(__name__)
 
 
+def _process_keywords(rows: list, min_len: int, top_n: int) -> list:
+    """纯 CPU 计算：词频统计（在独立线程中执行）"""
+    from collections import Counter
+    counter = Counter()
+    for (text,) in rows:
+        words = text.replace(",", " ").replace("，", " ") \
+                    .replace("!", " ").replace("！", " ") \
+                    .replace("?", " ").replace("？", " ") \
+                    .replace(".", " ").replace("。", " ") \
+                    .split()
+        for w in words:
+            w = w.strip()
+            if len(w) >= min_len and not w.isdigit():
+                counter[w] += 1
+    return [{"name": w, "value": c}
+            for w, c in counter.most_common(top_n)]
+
+
 class Storage:
     """异步 SQLite 存储"""
 
@@ -189,7 +207,7 @@ class Storage:
                          attention: int = 0, live_status: int = 0,
                          title: str = "", area_name: str = "") -> int:
         """添加一条房间指标"""
-        async with self._lock:
+        async with self._lock:  # 统一加锁，避免高并发 database is locked
             cursor = await self.db.execute(
                 """INSERT INTO room_metrics (room_id, timestamp, online, attention, live_status, title, area_name)
                    VALUES (?, ?, ?, ?, ?, ?, ?)""",
@@ -215,7 +233,7 @@ class Storage:
 
     async def get_top_keywords(self, room_id: str, since: float = 0,
                                min_len: int = 2, top_n: int = 30) -> list:
-        """获取高频关键词（基于分词后的短语统计）"""
+        """获取高频关键词（CPU密集计算→线程池，避免阻塞事件循环）"""
         cursor = await self.db.execute(
             """SELECT text FROM messages
                WHERE room_id = ? AND timestamp >= ? AND msg_type = 'danmaku'""",
@@ -223,22 +241,10 @@ class Storage:
         )
         rows = await cursor.fetchall()
 
-        from collections import Counter
-        counter = Counter()
-        for (text,) in rows:
-            # 简单分词：按空格/标点分割，过滤短词和纯数字
-            words = text.replace(",", " ").replace("，", " ") \
-                        .replace("!", " ").replace("！", " ") \
-                        .replace("?", " ").replace("？", " ") \
-                        .replace(".", " ").replace("。", " ") \
-                        .split()
-            for w in words:
-                w = w.strip()
-                if len(w) >= min_len and not w.isdigit():
-                    counter[w] += 1
+        # 将 CPU 密集型词频统计卸载到线程池
+        return await asyncio.to_thread(
+            _process_keywords, rows, min_len, top_n)
 
-        return [{"name": w, "value": c}
-                for w, c in counter.most_common(top_n)]
 
     async def get_top_phrases(self, room_id: str, since: float = 0,
                               min_len: int = 2, top_n: int = 20) -> list:
