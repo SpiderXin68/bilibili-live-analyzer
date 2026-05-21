@@ -16,18 +16,21 @@
 ### 1. 安装依赖
 
 ```bash
-# Python 依赖
-pip install fastapi uvicorn aiohttp aiosqlite brotli
+# Python 依赖（建议用虚拟环境或 --user）
+pip install -r backend/requirements.txt
 ```
 
 ### 2. 启动服务
 
 ```bash
 # 从项目根目录
-python backend/main.py
+python3 backend/main.py
 
-# 或指定端口和房间
-python backend/main.py --port 8080 --room 1762765173
+# 自定义端口和房间
+python3 backend/main.py --port 8080 --room 23255738
+
+# 调试模式（自动重载）
+python3 backend/main.py --debug
 ```
 
 ### 3. 打开页面
