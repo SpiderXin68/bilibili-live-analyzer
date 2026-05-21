@@ -275,6 +275,10 @@ class BiliLiveCollector:
                     await self._dm.disconnect()
             except Exception:
                 pass
+            finally:
+                # ✅ 断开后将 _dm 置空，防止 stop() 再次调用 disconnect()
+                #    造成 C 扩展层双重重置 → 段错误
+                self._dm = None
 
     async def run(self):
         """启动采集器"""
@@ -293,15 +297,19 @@ class BiliLiveCollector:
                 await self._http_session.close()
 
     async def stop(self):
-        """停止采集器"""
+        """停止采集器
+
+        ⚠️ 不在此处直接调用 self._dm.disconnect()，
+            _run() 的 finally 块会处理清理并置空 _dm。
+            只需取消任务并等待其完成即可。
+        """
         self._running = False
-        if self._dm:
-            try:
-                await self._dm.disconnect()
-            except Exception:
-                pass
-        if self._task:
+        if self._task and not self._task.done():
             self._task.cancel()
+            try:
+                await self._task
+            except asyncio.CancelledError:
+                pass
         if self._owns_session and self._http_session:
             await self._http_session.close()
         logger.info(f"🛑 已断开房间 {self.room_id}")

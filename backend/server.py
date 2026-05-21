@@ -83,17 +83,29 @@ async def database_writer_loop():
             await asyncio.sleep(1.0)
 
             # 攒够 3 种队列的数据
+            # ⚠️ 必须用 get_nowait()，不可先 empty() 再 get():
+            #    empty() 返回后协程可能被切换，item 被取走，
+            #    此时 get() 会永远阻塞 ⇒ 写入消费者死锁
             msg_batch = []
             while not message_queue.empty() and len(msg_batch) < 200:
-                msg_batch.append(await message_queue.get())
+                try:
+                    msg_batch.append(message_queue.get_nowait())
+                except asyncio.QueueEmpty:
+                    break
 
             evt_batch = []
             while not event_queue.empty() and len(evt_batch) < 200:
-                evt_batch.append(await event_queue.get())
+                try:
+                    evt_batch.append(event_queue.get_nowait())
+                except asyncio.QueueEmpty:
+                    break
 
             met_batch = []
             while not metric_queue.empty() and len(met_batch) < 50:
-                met_batch.append(await metric_queue.get())
+                try:
+                    met_batch.append(metric_queue.get_nowait())
+                except asyncio.QueueEmpty:
+                    break
 
             if msg_batch:
                 await storage.add_messages_bulk(msg_batch)
