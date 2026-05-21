@@ -28,6 +28,9 @@ def _process_keywords(rows: list, min_len: int, top_n: int) -> list:
     使用 jieba 精确模式分词，替代原 haskell 风格的 split() 分词，
     因为 B 站弹幕是纯中文，空格分割对中文无效。
     预加载 jieba 词典可能影响首次调用，之后极快。
+
+    注意：row_factory = aiosqlite.Row，行对象是类字典的 Row 而非 tuple，
+    不能用元组拆包 (text,) = row，必须用索引或键名安全访问。
     """
     import jieba
     from collections import Counter
@@ -35,7 +38,8 @@ def _process_keywords(rows: list, min_len: int, top_n: int) -> list:
     jieba.setLogLevel(logging.WARNING)
 
     counter = Counter()
-    for (text,) in rows:
+    for row in rows:
+        text = row[0]  # SELECT text 是第一列索引 0
         words = jieba.lcut(text)
         for w in words:
             w = w.strip()
@@ -114,18 +118,20 @@ class Storage:
         批量插入弹幕（一个事务，一次 commit）
 
         record 格式：(room_id, uid, username, text, msg_type, timestamp, extra_json)
+
+        不做 asyncio.Lock 保护：bulk 写入由 server.py 的单协程 consumer 独占调用，
+        不会有并发竞争。移除锁可以减少调度开销。
         """
         if not records:
             return 0
-        async with self._lock:
-            await self.db.executemany(
-                """INSERT INTO messages
-                   (room_id, uid, username, text, msg_type, timestamp, extra)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                records
-            )
-            await self.db.commit()
-            return len(records)
+        await self.db.executemany(
+            """INSERT INTO messages
+               (room_id, uid, username, text, msg_type, timestamp, extra)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            records
+        )
+        await self.db.commit()
+        return len(records)
 
     async def add_events_bulk(self, records: list) -> int:
         """
@@ -135,15 +141,14 @@ class Storage:
         """
         if not records:
             return 0
-        async with self._lock:
-            await self.db.executemany(
-                """INSERT INTO live_events
-                   (room_id, event_type, uid, username, content, timestamp)
-                   VALUES (?, ?, ?, ?, ?, ?)""",
-                records
-            )
-            await self.db.commit()
-            return len(records)
+        await self.db.executemany(
+            """INSERT INTO live_events
+               (room_id, event_type, uid, username, content, timestamp)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            records
+        )
+        await self.db.commit()
+        return len(records)
 
     async def add_metrics_bulk(self, records: list) -> int:
         """
@@ -153,15 +158,14 @@ class Storage:
         """
         if not records:
             return 0
-        async with self._lock:
-            await self.db.executemany(
-                """INSERT INTO room_metrics
-                   (room_id, timestamp, online, attention, live_status, title, area_name)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                records
-            )
-            await self.db.commit()
-            return len(records)
+        await self.db.executemany(
+            """INSERT INTO room_metrics
+               (room_id, timestamp, online, attention, live_status, title, area_name)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            records
+        )
+        await self.db.commit()
+        return len(records)
 
     # ── 单条写入（保留向后兼容，但高频路径建议走批量） ──
 

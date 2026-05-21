@@ -253,12 +253,15 @@ class BiliLiveCollector:
 
         try:
             logger.info(f"🔗 开始构建连接 {self.room_id}...")
-            # ✅ 先建立 WebSocket 连接，成功后再触发 on_connected
-            #    避免竞态条件：上层还没连上就收到 connected 通知
-            await self._dm.connect()
-            logger.info(f"✅ 成功连接直播间 {self.room_id}")
+
+            # ⚠️ 注意: await self._dm.connect() 是长生命周期阻塞调用
+            #    connect 内部会持续维持 WebSocket 直到连接断开，
+            #    所以 on_connected 必须在 connect() 之前触发，
+            #    create_task 异步调度避免阻塞连接流程。
             if self.on_connected:
-                await self.on_connected()
+                asyncio.create_task(self.on_connected())
+
+            await self._dm.connect()
             logger.info(f"💡 直播间 {self.room_id} 连接已正常关闭")
         except Exception as e:
             logger.error(f"采集器运行时异常: {e}")

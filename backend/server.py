@@ -345,8 +345,34 @@ async def lifespan(app: FastAPI):
         await current_collector.stop()
     if collector_task:
         collector_task.cancel()
+        try:
+            await collector_task
+        except asyncio.CancelledError:
+            pass
     if metrics_task:
         metrics_task.cancel()
+        try:
+            await metrics_task
+        except asyncio.CancelledError:
+            pass
+
+    # 排空队列：优雅停机，确保最后 1 秒的数据不丢失
+    logger.info("📦 排空写入队列...")
+    for queue, bulk_method in [
+        (message_queue, storage.add_messages_bulk),
+        (event_queue,   storage.add_events_bulk),
+        (metric_queue,  storage.add_metrics_bulk),
+    ]:
+        remaining = []
+        while not queue.empty():
+            try:
+                remaining.append(queue.get_nowait())
+            except asyncio.QueueEmpty:
+                break
+        if remaining:
+            await bulk_method(remaining)
+            logger.info(f"   ↪ 已写入 {len(remaining)} 条残留数据")
+
     writer_task.cancel()
     await storage.close()
 
