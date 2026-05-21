@@ -107,7 +107,7 @@ class BiliLiveCollector:
         self.on_super_chat: Optional[Callable[[dict], Awaitable[None]]] = None
         self.on_like: Optional[Callable[[dict], Awaitable[None]]] = None
         self.on_enter: Optional[Callable[[dict], Awaitable[None]]] = None
-        self.on_popularity: Optional[Callable[[int]], Awaitable[None]] = None
+        self.on_popularity: Optional[Callable[[int], Awaitable[None]]] = None
         self.on_connected: Optional[Callable[[], Awaitable[None]]] = None
         self.on_disconnected: Optional[Callable[[], Awaitable[None]]] = None
 

@@ -58,11 +58,13 @@ async def broadcast(data: dict):
         return
     msg = json.dumps(data, ensure_ascii=False)
 
-    tasks = [ws.send_text(msg) for ws in frontend_connections]
+    # ✅ 一次性拍快照，避免两次迭代 set 出现竞态错位
+    conns = list(frontend_connections)
+    tasks = [ws.send_text(msg) for ws in conns]
     results = await asyncio.gather(*tasks, return_exceptions=True)
 
     dead = set()
-    for ws, result in zip(list(frontend_connections), results):
+    for ws, result in zip(conns, results):
         if isinstance(result, Exception):
             dead.add(ws)
     if dead:
@@ -420,8 +422,6 @@ async def index():
 
 # ── Cookie 管理（B站扫码登录） ──
 
-_scan_qrcode_key: Optional[str] = None
-
 
 @app.get("/api/cookie/qrcode-image")
 async def cookie_qrcode_image(url: str = Query(...)):
@@ -457,7 +457,7 @@ async def cookie_qrcode():
     获取 B站 扫码登录二维码
     返回: {url (二维码图片地址), key (轮询密钥)}
     """
-    global _scan_qrcode_key
+
     try:
         session = http_session
         async with session.get(
@@ -473,7 +473,6 @@ async def cookie_qrcode():
             if data.get("code") != 0:
                 return {"ok": False, "error": data.get("message", "生成二维码失败")}
             result = data["data"]
-            _scan_qrcode_key = result["qrcode_key"]
             return {
                 "ok": True,
                 "url": result["url"],
@@ -500,10 +499,14 @@ async def cookie_poll(key: str = Query(...)):
             },
         ) as resp:
             data = await resp.json()
-            code = data.get("code", -1)
-            logger.info(f"扫码轮询: code={code}, data={data}")
 
-            if code == 0:
+            # ⚠️ B站 QR 轮询接口返回: {"code":0, "data":{"code":86038, ...}}
+            #    根级 code 永远为 0（HTTP 成功），实际状态在 data.data.code
+            qr_data = data.get("data", {})
+            qr_code = qr_data.get("code", -1) if data.get("code") == 0 else -1
+            logger.info(f"扫码轮询: qr_code={qr_code}")
+
+            if qr_code == 0:
                 set_cookies = resp.headers.getall("Set-Cookie", [])
                 if set_cookies:
                     cookie_parts = []
@@ -531,15 +534,15 @@ async def cookie_poll(key: str = Query(...)):
                         "status": "partial",
                         "message": "登录成功但 Cookie 不完整，请手动导出",
                     }
-            elif code == 86038:
+            elif qr_code == 86038:
                 return {"ok": False, "status": "expired",
                         "message": "二维码已失效，请重新获取"}
-            elif code == 86090:
+            elif qr_code == 86090:
                 return {"ok": True, "status": "scanned",
                         "message": "已扫码，请在手机上确认"}
             else:
                 return {"ok": True, "status": "pending",
-                        "message": "等待扫码...", "code": code}
+                        "message": "等待扫码...", "code": qr_code}
     except Exception as e:
         logger.error(f"扫码轮询失败: {e}")
         return {"ok": False, "error": str(e)}
