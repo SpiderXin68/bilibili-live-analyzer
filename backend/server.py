@@ -2,6 +2,11 @@
 FastAPI 服务器
 - REST API: 数据查询
 - WebSocket: 实时推送到前端
+
+高并发优化：
+- 写入全走异步队列（Queue），1s 积攒后 bulk insert，避免单条 commit 阻塞
+- 广播改用 asyncio.gather 并发发送，消除队头阻塞（Head-of-Line Blocking）
+- 所有高频回调只做广播（零等待），写库由后台消费者汇总
 """
 import asyncio
 import json
@@ -22,12 +27,11 @@ from config import settings
 
 logger = logging.getLogger(__name__)
 
-# 全局实例
+# ── 全局实例 ──
 storage = Storage()
 current_collector: Optional[BiliLiveCollector] = None
 collector_task: Optional[asyncio.Task] = None
 metrics_task: Optional[asyncio.Task] = None
-broadcast_task: Optional[asyncio.Task] = None
 
 # 全局 aiohttp ClientSession（应用生命周期管理，避免频繁 TCP 握手）
 http_session: Optional[aiohttp.ClientSession] = None
@@ -35,30 +39,79 @@ http_session: Optional[aiohttp.ClientSession] = None
 # WebSocket 连接池
 frontend_connections: set = set()
 
+# ── 异步写入队列 ──
+# 弹幕/事件/指标不直接写库，而是打入内存队列
+# database_writer_loop 每 1s 积攒后批量 executemany + 一次 commit
+message_queue: asyncio.Queue = asyncio.Queue()
+event_queue: asyncio.Queue = asyncio.Queue()
+metric_queue: asyncio.Queue = asyncio.Queue()
+
 
 async def broadcast(data: dict):
-    """向所有前端广播消息（使用 list() 防止并发修改异常）"""
+    """
+    向所有前端广播消息
+
+    优化：使用 asyncio.gather 并发发送，避免顺序发送时某个慢连接
+    阻塞全部（队头阻塞 Head-of-Line Blocking）。
+    """
+    if not frontend_connections:
+        return
     msg = json.dumps(data, ensure_ascii=False)
+
+    tasks = [ws.send_text(msg) for ws in frontend_connections]
+    results = await asyncio.gather(*tasks, return_exceptions=True)
+
     dead = set()
-    for ws in list(frontend_connections):
-        try:
-            await ws.send_text(msg)
-        except Exception:
+    for ws, result in zip(list(frontend_connections), results):
+        if isinstance(result, Exception):
             dead.add(ws)
     if dead:
         frontend_connections.difference_update(dead)
 
 
+async def database_writer_loop():
+    """
+    后台常驻：异步队列消费者
+
+    每 1s 或积攒满 200 条时，从三个队列 drain 数据，
+    批量写入数据库（一个事务一次 commit），大幅降低磁盘 I/O。
+    """
+    while True:
+        try:
+            await asyncio.sleep(1.0)
+
+            # 攒够 3 种队列的数据
+            msg_batch = []
+            while not message_queue.empty() and len(msg_batch) < 200:
+                msg_batch.append(await message_queue.get())
+
+            evt_batch = []
+            while not event_queue.empty() and len(evt_batch) < 200:
+                evt_batch.append(await event_queue.get())
+
+            met_batch = []
+            while not metric_queue.empty() and len(met_batch) < 50:
+                met_batch.append(await metric_queue.get())
+
+            if msg_batch:
+                await storage.add_messages_bulk(msg_batch)
+            if evt_batch:
+                await storage.add_events_bulk(evt_batch)
+            if met_batch:
+                await storage.add_metrics_bulk(met_batch)
+
+        except Exception as e:
+            logger.error(f"批量写库异常: {e}")
+
+
+# ── 事件回调（只广播 + 入队，不直接写库） ──
+
 async def record_danmaku(data: dict):
-    """保存弹幕并广播"""
-    await storage.add_message(
-        room_id=str(current_collector.room_id) if current_collector
-        else settings.DEFAULT_ROOM_ID,
-        uid=data.get("uid", 0),
-        username=data.get("username", ""),
-        text=data.get("text", ""),
-        extra={"dm_type": data.get("dm_type", 0)}
-    )
+    """处理弹幕：广播 + 入队（不直接写库）"""
+    room_id = str(current_collector.room_id) if current_collector \
+              else settings.DEFAULT_ROOM_ID
+
+    # 广播（零延迟推送大屏）
     await broadcast({
         "type": "danmaku",
         "data": {
@@ -69,17 +122,24 @@ async def record_danmaku(data: dict):
         }
     })
 
+    # 入队待批量写入
+    await message_queue.put((
+        int(room_id),
+        data.get("uid", 0),
+        data.get("username", ""),
+        data.get("text", ""),
+        "danmaku",
+        time.time(),
+        json.dumps({"dm_type": data.get("dm_type", 0)},
+                    ensure_ascii=False),
+    ))
+
 
 async def record_gift(data: dict):
-    """保存礼物并广播"""
-    await storage.add_event(
-        room_id=str(current_collector.room_id) if current_collector
-        else settings.DEFAULT_ROOM_ID,
-        event_type="gift",
-        uid=data.get("uid", 0),
-        username=data.get("username", ""),
-        content=data,
-    )
+    """处理礼物：广播 + 入队"""
+    room_id = str(current_collector.room_id) if current_collector \
+              else settings.DEFAULT_ROOM_ID
+
     await broadcast({
         "type": "gift",
         "data": {
@@ -90,17 +150,21 @@ async def record_gift(data: dict):
         }
     })
 
+    await event_queue.put((
+        int(room_id),
+        "gift",
+        data.get("uid", 0),
+        data.get("username", ""),
+        json.dumps(data, ensure_ascii=False),
+        time.time(),
+    ))
+
 
 async def record_super_chat(data: dict):
-    """保存 SC 并广播"""
-    await storage.add_event(
-        room_id=str(current_collector.room_id) if current_collector
-        else settings.DEFAULT_ROOM_ID,
-        event_type="super_chat",
-        uid=data.get("uid", 0),
-        username=data.get("username", ""),
-        content=data,
-    )
+    """处理 SC：广播 + 入队"""
+    room_id = str(current_collector.room_id) if current_collector \
+              else settings.DEFAULT_ROOM_ID
+
     await broadcast({
         "type": "super_chat",
         "data": {
@@ -110,42 +174,57 @@ async def record_super_chat(data: dict):
         }
     })
 
+    await event_queue.put((
+        int(room_id),
+        "super_chat",
+        data.get("uid", 0),
+        data.get("username", ""),
+        json.dumps(data, ensure_ascii=False),
+        time.time(),
+    ))
+
 
 async def record_like(data: dict):
-    """保存点赞并广播"""
-    await storage.add_event(
-        room_id=str(current_collector.room_id) if current_collector
-        else settings.DEFAULT_ROOM_ID,
-        event_type="like",
-        uid=data.get("uid", 0),
-        username=data.get("username", ""),
-        content=data,
-    )
+    """处理点赞：广播 + 入队"""
+    room_id = str(current_collector.room_id) if current_collector \
+              else settings.DEFAULT_ROOM_ID
+
     await broadcast({
         "type": "like",
-        "data": {
-            "username": data.get("username", ""),
-        }
+        "data": {"username": data.get("username", "")}
     })
+
+    await event_queue.put((
+        int(room_id),
+        "like",
+        data.get("uid", 0),
+        data.get("username", ""),
+        json.dumps(data, ensure_ascii=False),
+        time.time(),
+    ))
 
 
 async def record_enter(data: dict):
-    """保存进入并广播"""
-    await storage.add_event(
-        room_id=str(current_collector.room_id) if current_collector
-        else settings.DEFAULT_ROOM_ID,
-        event_type="enter",
-        uid=data.get("uid", 0),
-        username=data.get("username", ""),
-        content=data,
-    )
+    """处理进入：广播 + 入队"""
+    room_id = str(current_collector.room_id) if current_collector \
+              else settings.DEFAULT_ROOM_ID
+
     await broadcast({
         "type": "enter",
-        "data": {
-            "username": data.get("username", ""),
-        }
+        "data": {"username": data.get("username", "")}
     })
 
+    await event_queue.put((
+        int(room_id),
+        "enter",
+        data.get("uid", 0),
+        data.get("username", ""),
+        json.dumps(data, ensure_ascii=False),
+        time.time(),
+    ))
+
+
+# ── 采集器控制 ──
 
 async def start_collector(room_id: str):
     """启动/切换采集器"""
@@ -208,14 +287,14 @@ async def collect_metrics_periodically(room_id: str):
                 live_status = info.get("live_status", 0)
                 title = info.get("title", "")
                 area_name = info.get("area_name", "")
-                await storage.add_metric(
-                    room_id=room_id,
-                    online=online,
-                    attention=attention,
-                    live_status=live_status,
-                    title=title,
-                    area_name=area_name,
-                )
+
+                # 入队批量写入
+                await metric_queue.put((
+                    int(room_id),
+                    time.time(),
+                    online, attention, live_status, title, area_name,
+                ))
+
                 await broadcast({
                     "type": "metrics",
                     "data": {
@@ -233,7 +312,7 @@ async def collect_metrics_periodically(room_id: str):
                 )
         except Exception as e:
             logger.warning(f"采集房间指标失败: {e}")
-        await asyncio.sleep(60)  # 每分钟采集一次
+        await asyncio.sleep(60)
 
 
 # ── FastAPI 应用 ──
@@ -248,6 +327,10 @@ async def lifespan(app: FastAPI):
     # 创建全局 aiohttp ClientSession（整个应用共享一个）
     http_session = aiohttp.ClientSession()
     logger.info("🔌 全局 HTTP Session 已创建")
+
+    # 启动数据库批量写入消费者
+    writer_task = asyncio.create_task(database_writer_loop())
+    logger.info("📦 异步写入消费者已启动")
 
     await storage.init()
 
@@ -264,6 +347,7 @@ async def lifespan(app: FastAPI):
         collector_task.cancel()
     if metrics_task:
         metrics_task.cancel()
+    writer_task.cancel()
     await storage.close()
 
     # 清理全局 HTTP Session
@@ -349,7 +433,7 @@ async def cookie_qrcode():
     """
     global _scan_qrcode_key
     try:
-        session = http_session  # 复用全局 session
+        session = http_session
         async with session.get(
             "https://passport.bilibili.com/x/passport-login/web/qrcode/generate",
             params={"source": "main-fe-header"},
@@ -376,13 +460,10 @@ async def cookie_qrcode():
 
 @app.get("/api/cookie/poll")
 async def cookie_poll(key: str = Query(...)):
-    """
-    轮询扫码登录状态
-    返回: {status: "pending"|"scanned"|"expired"|"ok", cookies: str (成功时)}
-    """
+    """轮询扫码登录状态"""
     from collector import _save_cookie_header
     try:
-        session = http_session  # 复用全局 session
+        session = http_session
         async with session.get(
             "https://passport.bilibili.com/x/passport-login/web/qrcode/poll",
             params={"qrcode_key": key},
@@ -397,7 +478,6 @@ async def cookie_poll(key: str = Query(...)):
             logger.info(f"扫码轮询: code={code}, data={data}")
 
             if code == 0:
-                # 登录成功！捕获 Set-Cookie
                 set_cookies = resp.headers.getall("Set-Cookie", [])
                 if set_cookies:
                     cookie_parts = []
@@ -406,12 +486,9 @@ async def cookie_poll(key: str = Query(...)):
                         if "=" in parts and "Path=" not in parts:
                             cookie_parts.append(parts)
                     cookie_str = "; ".join(cookie_parts)
-
-                    # 保存到文件
                     _save_cookie_header(cookie_str)
-                    logger.info(f"✅ 扫码登录成功，Cookie 已保存")
+                    logger.info("✅ 扫码登录成功，Cookie 已保存")
 
-                    # 自动重新连接采集器
                     room_id = current_collector.room_id \
                         if current_collector else settings.DEFAULT_ROOM_ID
                     await start_collector(room_id)
@@ -428,20 +505,15 @@ async def cookie_poll(key: str = Query(...)):
                         "status": "partial",
                         "message": "登录成功但 Cookie 不完整，请手动导出",
                     }
-
             elif code == 86038:
-                # 二维码已失效
                 return {"ok": False, "status": "expired",
                         "message": "二维码已失效，请重新获取"}
             elif code == 86090:
-                # 已扫码但未确认
                 return {"ok": True, "status": "scanned",
                         "message": "已扫码，请在手机上确认"}
             else:
-                # 等待扫码
                 return {"ok": True, "status": "pending",
-                        "message": "等待扫码...",
-                        "code": code}
+                        "message": "等待扫码...", "code": code}
     except Exception as e:
         logger.error(f"扫码轮询失败: {e}")
         return {"ok": False, "error": str(e)}
@@ -451,7 +523,6 @@ async def cookie_poll(key: str = Query(...)):
 async def cookie_status():
     """检查 Cookie 状态"""
     from collector import _find_cookie_file, _load_cookie_header
-
     path = _find_cookie_file()
     if path:
         header = _load_cookie_header()
@@ -471,18 +542,15 @@ async def cookie_status():
 async def api_status():
     """服务状态"""
     from collector import _find_cookie_file, _load_cookie_header
-
     room_id = current_collector.room_id if current_collector else None
     has_cookie = bool(_find_cookie_file())
     has_login = False
     if has_cookie:
         header = _load_cookie_header()
         has_login = "SESSDATA" in str(header) if header else False
-
     running = current_collector and current_collector._running
     info = await current_collector.get_room_info() \
         if current_collector else {}
-
     return {
         "running": running,
         "has_cookie": has_cookie,
@@ -560,7 +628,7 @@ async def api_metrics(room_id: str = None, since: float = 0):
 async def api_stats(room_id: str = None, bucket: int = 60):
     """聚合统计（6路并发查询，总耗时 = 最慢的单一路径）"""
     rid = room_id or settings.DEFAULT_ROOM_ID
-    since = time.time() - 3600  # 最近 1 小时
+    since = time.time() - 3600
 
     results = await asyncio.gather(
         storage.get_total_interactions(rid, since=since),
@@ -598,7 +666,6 @@ async def api_export(room_id: str = None,
     since_val = since or (time.time() - 3600)
     data = await storage.get_export_data(rid, since=since_val,
                                          until=until or time.time())
-
     if fmt == "csv":
         import csv, io
         buf = io.StringIO()
@@ -620,18 +687,12 @@ async def api_export(room_id: str = None,
 
 @app.get("/api/activity")
 async def api_activity(room_id: str = None, bucket: int = 60):
-    """活跃度和未进入人数统计，bucket=采样间隔(秒)"""
+    """活跃度和未进入人数统计"""
     rid = room_id or settings.DEFAULT_ROOM_ID
-    since = time.time() - 3600  # 最近 1 小时
-
+    since = time.time() - 3600
     data = await storage.get_active_users_density(
         rid, since=since, bucket_seconds=bucket)
-
-    return {
-        "room_id": rid,
-        "bucket_seconds": bucket,
-        **data,
-    }
+    return {"room_id": rid, "bucket_seconds": bucket, **data}
 
 
 # ── WebSocket 实时推送 ──
@@ -643,10 +704,8 @@ async def websocket_endpoint(websocket: WebSocket):
     frontend_connections.add(websocket)
     logger.info(f"📱 前端连接: {websocket.client} "
                 f"(共 {len(frontend_connections)} 个连接)")
-
     try:
         while True:
-            # 接收前端消息（控制指令等）
             data = await websocket.receive_text()
             try:
                 msg = json.loads(data)
@@ -660,9 +719,7 @@ async def websocket_endpoint(websocket: WebSocket):
                             "data": {"room_id": room_id, "status": "connected"}
                         }))
                 elif action == "ping":
-                    await websocket.send_text(json.dumps({
-                        "type": "pong"
-                    }))
+                    await websocket.send_text(json.dumps({"type": "pong"}))
             except json.JSONDecodeError:
                 pass
     except WebSocketDisconnect:
