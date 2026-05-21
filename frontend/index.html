@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-CN" class="h-full bg-slate-950">
+<html lang="zh-CN">
 <head>
  <meta charset="utf-8">
  <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -7,309 +7,525 @@
  <script src="https://cdn.tailwindcss.com"></script>
  <script src="/static/vue.global.prod.js"></script>
  <script src="/static/echarts.min.js"></script>
- <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+ <link rel="preconnect" href="https://fonts.googleapis.com">
+ <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+ <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;600;700&family=Noto+Sans+SC:wght@400;500;700;900&display=swap" rel="stylesheet">
  <style>
- .no-scrollbar::-webkit-scrollbar { display: none; }
- .no-scrollbar { -ms-overflow-style: none; scrollbar-width: none; }
- .danmaku-item { animation: fadeIn 0.25s ease-out forwards; }
- @keyframes fadeIn {
- from { opacity: 0; transform: translateY(6px); }
- to { opacity: 1; transform: translateY(0); }
+ :root {
+ --bili-pink: #fb7299;
+ --bili-blue: #00a1d6;
+ --bili-pink-glow: rgba(251,114,153,0.15);
+ --bili-blue-glow: rgba(0,161,214,0.12);
+ --bg-base: #0a0c10;
+ --bg-card: #111318;
+ --bg-card2: #161920;
+ --border: rgba(255,255,255,0.06);
+ --border-pink: rgba(251,114,153,0.3);
+ --text-dim: #5a6070;
+ --text-muted: #8892a4;
  }
+ * { box-sizing: border-box; }
+ html, body { height: 100%; margin: 0; }
+ body {
+ background: var(--bg-base);
+ color: #e2e8f0;
+ font-family: 'Noto Sans SC', sans-serif;
+ }
+ #app { min-height: 100vh; display: flex; flex-direction: column; }
+ [v-cloak] { display: none; }
+
+ /* Scrollbar */
+ .slim-scroll::-webkit-scrollbar { width: 3px; }
+ .slim-scroll::-webkit-scrollbar-track { background: transparent; }
+ .slim-scroll::-webkit-scrollbar-thumb { background: var(--border); border-radius: 99px; }
+ .slim-scroll { scrollbar-width: thin; scrollbar-color: var(--border) transparent; }
+
+ /* Danmaku entrance */
+ .danmaku-item { animation: slideIn 0.2s cubic-bezier(0.16,1,0.3,1) both; }
+ @keyframes slideIn {
+ from { opacity: 0; transform: translateY(8px) scale(0.98); }
+ to { opacity: 1; transform: translateY(0) scale(1); }
+ }
+
+ /* Neon dot */
+ .dot-live { width: 7px; height: 7px; border-radius: 50%; background: var(--bili-pink); box-shadow: 0 0 8px var(--bili-pink); flex-shrink: 0; }
+ .dot-live.pulse { animation: dotPulse 1.6s ease-in-out infinite; }
+ @keyframes dotPulse {
+ 0%,100% { opacity: 1; box-shadow: 0 0 6px var(--bili-pink); }
+ 50% { opacity: 0.5; box-shadow: 0 0 14px var(--bili-pink); }
+ }
+
+ /* WS badge pulse */
+ .ws-dot { width: 7px; height: 7px; border-radius: 50%; flex-shrink: 0; position: relative; }
+ .ws-dot::after {
+ content: ''; position: absolute; inset: -3px; border-radius: 50%;
+ animation: ripple 2s ease-out infinite;
+ }
+ .ws-dot.on { background: #22d3a0; }
+ .ws-dot.off { background: #f56565; }
+ .ws-dot.on::after { border: 1.5px solid #22d3a0; }
+ .ws-dot.off::after { border: 1.5px solid #f56565; }
+ @keyframes ripple {
+ 0% { transform: scale(1); opacity: 0.7; }
+ 100% { transform: scale(2.5); opacity: 0; }
+ }
+
+ /* Card base */
+ .card {
+ background: var(--bg-card);
+ border: 1px solid var(--border);
+ border-radius: 14px;
+ }
+
+ /* Stat cards */
+ .stat-num { font-family: 'JetBrains Mono', monospace; letter-spacing: -0.03em; }
+
+ /* Tag label */
+ .tag {
+ font-size: 10px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase;
+ padding: 2px 8px; border-radius: 6px;
+ }
+ .tag-live { background: rgba(251,114,153,0.12); color: var(--bili-pink); border: 1px solid rgba(251,114,153,0.25); }
+ .tag-offline { background: rgba(255,255,255,0.04); color: var(--text-dim); border: 1px solid var(--border); }
+ .tag-area { background: rgba(0,161,214,0.08); color: var(--bili-blue); border: 1px solid rgba(0,161,214,0.2); }
+
+ /* Rank badge */
+ .rank-1 { background: rgba(255,200,80,0.12); color: #f5c842; border: 1px solid rgba(255,200,80,0.25); }
+ .rank-2 { background: rgba(180,190,200,0.1); color: #b4bec8; border: 1px solid rgba(180,190,200,0.2); }
+ .rank-3 { background: rgba(200,140,100,0.1); color: #cc8866; border: 1px solid rgba(200,140,100,0.2); }
+ .rank-n { background: rgba(255,255,255,0.04); color: var(--text-dim); border: 1px solid var(--border); }
+
+ /* Section header line */
+ .section-title {
+ font-size: 11px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase;
+ color: var(--text-muted); display: flex; align-items: center; gap: 8px;
+ }
+ .section-title::before {
+ content: ''; width: 3px; height: 14px; border-radius: 2px;
+ background: linear-gradient(180deg, var(--bili-pink), transparent);
+ flex-shrink: 0;
+ }
+
+ /* Connect button */
+ .btn-connect {
+ background: linear-gradient(135deg, #fb7299, #f4547a);
+ color: #fff; font-size: 12px; font-weight: 700;
+ border: none; border-radius: 8px; padding: 0 16px; cursor: pointer;
+ transition: opacity 0.15s, transform 0.1s;
+ white-space: nowrap;
+ }
+ .btn-connect:hover { opacity: 0.88; transform: translateY(-1px); }
+ .btn-connect:active { transform: scale(0.97); }
+
+ /* Login modal */
+ .modal-backdrop { background: rgba(5,7,12,0.85); backdrop-filter: blur(10px); }
+ .modal-box { background: #12151c; border: 1px solid rgba(251,114,153,0.2); border-radius: 20px; }
+
+ /* SC item */
+ .sc-item {
+ background: linear-gradient(135deg, rgba(255,180,50,0.08), rgba(255,120,50,0.05));
+ border-left: 3px solid #f5c842;
+ border-radius: 0 10px 10px 0;
+ }
+
+ /* Fade transition */
+ .fade-enter-active,.fade-leave-active { transition: opacity 0.25s; }
+ .fade-enter-from,.fade-leave-to { opacity: 0; }
+
+ /* Header watermark */
+ .header-decor {
+ position: absolute; right: -10px; top: -8px;
+ font-size: 64px; font-weight: 900; color: rgba(251,114,153,0.04);
+ pointer-events: none; line-height: 1; letter-spacing: -0.05em;
+ font-family: 'JetBrains Mono', monospace;
+ }
+
+ /* Event type chips */
+ .chip-dm { color: #7dd3fc; background: rgba(125,211,252,0.07); }
+ .chip-gift { color: #c4b5fd; background: rgba(196,181,253,0.08); }
+ .chip-sc { color: #fde68a; background: rgba(253,230,138,0.07); }
+ .chip-enter { color: #6ee7b7; background: rgba(110,231,183,0.07); }
+ .chip-like { color: #fca5a5; background: rgba(252,165,165,0.07); }
+ .chip { font-size: 9px; font-weight: 700; letter-spacing: 0.06em; text-transform: uppercase; padding: 1px 6px; border-radius: 5px; }
+
+ /* Thin divider */
+ .divider { height: 1px; background: var(--border); }
  </style>
 </head>
-<body class="h-full text-slate-100 font-sans antialiased">
- <div id="app" class="min-h-screen flex flex-col" v-cloak>
+<body>
+<div id="app" v-cloak class="min-h-screen flex flex-col">
 
- <header class="bg-slate-900/80 backdrop-blur-md border-b border-slate-800 sticky top-0 z-40 px-6 py-3 flex items-center justify-between">
- <div class="flex items-center space-x-3">
- <div class="bg-blue-600 p-2 rounded-lg text-white shadow-lg shadow-blue-500/20">
- <i class="fa-solid fa-chart-line text-xl"></i>
+ <!-- ═══ HEADER ═══ -->
+ <header style="background: rgba(10,12,16,0.9); border-bottom: 1px solid var(--border); backdrop-filter: blur(16px); position: sticky; top: 0; z-index: 40; padding: 0 24px;">
+ <div style="max-width: 1600px; margin: 0 auto; height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 20px;">
+
+ <!-- Logo & title -->
+ <div style="display: flex; align-items: center; gap: 12px; flex-shrink: 0;">
+ <div style="width: 34px; height: 34px; border-radius: 10px; background: linear-gradient(135deg, #fb7299, #f4547a); display: flex; align-items: center; justify-content: center; flex-shrink: 0; box-shadow: 0 4px 12px rgba(251,114,153,0.35);">
+ <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+ <polyline points="22 12 18 12 15 21 9 3 6 12 2 12"/>
+ </svg>
  </div>
  <div>
- <h1 class="text-lg font-bold tracking-tight bg-gradient-to-r from-blue-400 to-indigo-400 bg-clip-text text-transparent">B站直播弹幕实时分析平台</h1>
- <p class="text-xs text-slate-400">Real-time Danmaku Analytics Dashboard</p>
+ <div style="font-size: 15px; font-weight: 700; color: #f1f5f9; letter-spacing: -0.02em; line-height: 1.2;">B站弹幕分析平台</div>
+ <div style="font-size: 10px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; letter-spacing: 0.05em;">BILIBILI LIVE ANALYTICS</div>
  </div>
  </div>
 
- <div class="flex items-center space-x-4">
- <div class="flex items-center bg-slate-950 border border-slate-800 rounded-lg p-1 shadow-inner focus-within:border-blue-500 transition">
- <span class="text-xs text-slate-500 px-2 font-mono">ROOM ID</span>
- <input type="text" v-model="targetRoomId" @keyup.enter="switchRoom" class="bg-transparent text-sm font-semibold text-blue-400 focus:outline-none w-28 placeholder-slate-700" placeholder="输入房间号">
- <button @click="switchRoom" class="bg-blue-600 hover:bg-blue-500 text-xs text-white font-medium px-3 py-1.5 rounded-md transition shadow-md">
- <i class="fa-solid fa-right-from-bracket mr-1"></i>连接
+ <!-- Controls -->
+ <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
+
+ <!-- Room ID input -->
+ <div style="display: flex; align-items: center; gap: 0; height: 36px; background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 10px; overflow: hidden; transition: border-color 0.2s;" @focusin="$event.currentTarget.style.borderColor='var(--bili-pink)'" @focusout="$event.currentTarget.style.borderColor='var(--border)'">
+ <span style="font-size: 9px; font-weight: 700; letter-spacing: 0.1em; color: var(--text-dim); padding: 0 10px; border-right: 1px solid var(--border); white-space: nowrap; font-family: 'JetBrains Mono', monospace;">ROOM</span>
+ <input type="text" v-model="targetRoomId" @keyup.enter="switchRoom"
+  style="background: transparent; color: #e2e8f0; border: none; outline: none; padding: 0 10px; font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 600; width: 110px;"
+  placeholder="输入房间号">
+ <button @click="switchRoom" class="btn-connect" style="height: 100%; border-radius: 0 9px 9px 0; padding: 0 14px;">连接</button>
+ </div>
+
+ <!-- Cookie status -->
+ <button @click="openLoginModal"
+  style="height: 36px; padding: 0 14px; border-radius: 10px; font-size: 11px; font-weight: 600; display: flex; align-items: center; gap: 7px; cursor: pointer; transition: all 0.2s; border: 1px solid; white-space: nowrap;"
+  :style="cookieStatus.has_login
+ ? 'background: rgba(34,211,160,0.07); color: #22d3a0; border-color: rgba(34,211,160,0.2);'
+ : 'background: rgba(251,114,153,0.07); color: var(--bili-pink); border-color: var(--border-pink);'">
+ <svg v-if="cookieStatus.has_login" width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/><polyline points="16 11 18 13 22 9"/></svg>
+ <svg v-else width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/><line x1="18" y1="8" x2="23" y2="13"/><line x1="23" y1="8" x2="18" y2="13"/></svg>
+ <span>{{ cookieStatus.has_login ? '已登录' : '未登录' }}</span>
  </button>
+
+ <!-- WS status -->
+ <div style="height: 36px; padding: 0 14px; border-radius: 10px; background: rgba(255,255,255,0.03); border: 1px solid var(--border); display: flex; align-items: center; gap: 8px; font-family: 'JetBrains Mono', monospace; font-size: 11px; font-weight: 600; white-space: nowrap;">
+ <div class="ws-dot" :class="wsConnected ? 'on' : 'off'"></div>
+ <span :style="wsConnected ? 'color:#22d3a0' : 'color:#f56565'">{{ wsConnected ? 'LIVE' : 'OFF' }}</span>
  </div>
 
- <button @click="openLoginModal" class="flex items-center space-x-2 px-3 py-2 rounded-lg border text-xs transition"
- :class="cookieStatus.has_login ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-400' : 'border-amber-500/30 bg-amber-500/10 text-amber-400 hover:bg-amber-500/20'">
- <i class="fa-solid" :class="cookieStatus.has_login ? 'fa-user-check' : 'fa-user-slash'"></i>
- <span>{{ cookieStatus.has_login ? '已登录(Cookie有效)' : '未登录(限流隐患)' }}</span>
- </button>
-
- <div class="flex items-center space-x-1.5 bg-slate-950 border border-slate-800 px-3 py-2 rounded-lg text-xs font-mono">
- <span class="relative flex h-2 w-2">
- <span class="animate-ping absolute inline-flex h-full w-full rounded-full opacity-75" :class="wsConnected ? 'bg-emerald-400' : 'bg-rose-400'"></span>
- <span class="relative inline-flex rounded-full h-2 w-2" :class="wsConnected ? 'bg-emerald-500' : 'bg-rose-500'"></span>
- </span>
- <span :class="wsConnected ? 'text-emerald-400' : 'text-rose-400'">{{ wsConnected ? 'WS STREAMING' : 'DISCONNECTED' }}</span>
  </div>
  </div>
  </header>
 
- <main class="flex-1 p-6 grid grid-cols-12 gap-6 max-w-[1600px] w-full mx-auto">
+ <!-- ═══ MAIN GRID ═══ -->
+ <main style="flex: 1; padding: 24px; max-width: 1600px; width: 100%; margin: 0 auto;">
+ <div style="display: grid; grid-template-columns: 340px 1fr; gap: 20px; align-items: start;">
 
- <section class="col-span-12 lg:col-span-4 flex flex-col space-y-6 max-h-[85vh]">
- <div class="bg-slate-900 border border-slate-800/80 rounded-xl p-5 shadow-xl relative overflow-hidden">
- <div class="absolute -right-6 -top-6 text-slate-800/20 text-7xl font-black pointer-events-none">LIVE</div>
- <div class="flex items-start justify-between">
- <div class="space-y-1">
- <div class="flex items-center space-x-2">
- <span class="px-2 py-0.5 rounded text-[10px] font-bold tracking-wider"
- :class="roomInfo.live_status === 1 ? 'bg-rose-500/20 text-rose-400 border border-rose-500/30' : 'bg-slate-800 text-slate-400'">
- {{ roomInfo.live_status === 1 ? '● 直播中' : '未开播' }}
+ <!-- ── LEFT COLUMN ── -->
+ <div style="display: flex; flex-direction: column; gap: 16px; max-height: calc(100vh - 106px); position: sticky; top: 82px;">
+
+ <!-- Room info card -->
+ <div class="card" style="padding: 18px; position: relative; overflow: hidden;">
+ <div class="header-decor">LIVE</div>
+ <div style="display: flex; align-items: flex-start; justify-content: space-between; gap: 12px;">
+ <div style="min-width: 0; flex: 1;">
+ <div style="display: flex; align-items: center; gap: 7px; margin-bottom: 8px; flex-wrap: wrap;">
+ <div class="tag" :class="roomInfo.live_status === 1 ? 'tag-live' : 'tag-offline'" style="display: flex; align-items: center; gap: 4px;">
+ <div v-if="roomInfo.live_status === 1" class="dot-live pulse" style="width:5px;height:5px;"></div>
+ {{ roomInfo.live_status === 1 ? '直播中' : '未开播' }}
+ </div>
+ <div class="tag tag-area" v-if="roomInfo.area_name">{{ roomInfo.area_name }}</div>
+ </div>
+ <div style="font-size: 15px; font-weight: 700; color: #f1f5f9; line-height: 1.35; margin-bottom: 5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" :title="roomInfo.title">
+ {{ roomInfo.title || '等待连接直播间...' }}
+ </div>
+ <div style="font-size: 11px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace;">
+ ROOM <span style="color: var(--text-muted); font-weight: 700;">{{ currentRoomId || '—' }}</span>
+ </div>
+ </div>
+ </div>
+
+ <div style="height: 1px; background: var(--border); margin: 14px 0;"></div>
+
+ <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px;">
+ <div style="background: rgba(251,114,153,0.05); border: 1px solid rgba(251,114,153,0.12); border-radius: 10px; padding: 12px;">
+ <div style="font-size: 10px; color: var(--text-dim); margin-bottom: 4px; display: flex; align-items: center; gap: 5px;">
+ <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--bili-pink)" stroke-width="2.5"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>
+ 当前人气
+ </div>
+ <div class="stat-num" style="font-size: 22px; font-weight: 700; color: var(--bili-pink);">{{ formatNum(roomInfo.online) }}</div>
+ </div>
+ <div style="background: rgba(0,161,214,0.05); border: 1px solid rgba(0,161,214,0.12); border-radius: 10px; padding: 12px;">
+ <div style="font-size: 10px; color: var(--text-dim); margin-bottom: 4px; display: flex; align-items: center; gap: 5px;">
+ <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="var(--bili-blue)" stroke-width="2.5"><path d="M20.84 4.61a5.5 5.5 0 0 0-7.78 0L12 5.67l-1.06-1.06a5.5 5.5 0 0 0-7.78 7.78l1.06 1.06L12 21.23l7.78-7.78 1.06-1.06a5.5 5.5 0 0 0 0-7.78z"/></svg>
+ 粉丝关注
+ </div>
+ <div class="stat-num" style="font-size: 22px; font-weight: 700; color: var(--bili-blue);">{{ formatNum(roomInfo.attention) }}</div>
+ </div>
+ </div>
+ </div>
+
+ <!-- Danmaku stream -->
+ <div class="card" style="flex: 1; display: flex; flex-direction: column; overflow: hidden; min-height: 420px; max-height: calc(100vh - 390px);">
+ <div style="padding: 14px 16px; border-bottom: 1px solid var(--border); display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;">
+ <div class="section-title">实时弹幕流水</div>
+ <div style="font-size: 10px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; background: rgba(255,255,255,0.04); padding: 2px 8px; border-radius: 5px; border: 1px solid var(--border);">
+ {{ danmakuList.length }}/500
+ </div>
+ </div>
+
+ <div ref="danmakuBox" class="slim-scroll" style="flex: 1; overflow-y: auto; padding: 12px; display: flex; flex-direction: column; gap: 6px;">
+
+ <!-- SC -->
+ <template v-for="(msg, idx) in danmakuList" :key="idx">
+ <div class="danmaku-item sc-item" v-if="msg.isSC" style="padding: 10px 12px; margin-bottom: 2px;">
+ <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 5px;">
+ <div style="display: flex; align-items: center; gap: 6px;">
+ <span class="chip chip-sc">SC</span>
+ <span style="font-size: 12px; font-weight: 700; color: #fde68a;">{{ msg.username }}</span>
+ </div>
+ <span class="stat-num" style="font-size: 13px; font-weight: 700; color: #f5c842;">¥{{ msg.price }}</span>
+ </div>
+ <p style="font-size: 13px; color: #fef3c7; line-height: 1.4; margin: 0;">{{ msg.text }}</p>
+ </div>
+
+ <!-- Gift -->
+ <div class="danmaku-item" v-else-if="msg.isGift" style="background: rgba(196,181,253,0.05); border: 1px solid rgba(196,181,253,0.1); border-radius: 8px; padding: 7px 10px; display: flex; align-items: center; gap: 8px;">
+ <span class="chip chip-gift">礼物</span>
+ <span style="font-size: 12px; color: #c4b5fd;">
+ <strong style="color: #ddd6fe;">{{ msg.username }}</strong>
+ 赠送了 <strong style="color: #c4b5fd;">{{ msg.gift_name }}</strong> ×{{ msg.num }}
  </span>
- <span class="text-xs text-slate-400 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">{{ roomInfo.area_name || '未知分区' }}</span>
- </div>
- <h2 class="text-base font-bold text-slate-100 truncate max-w-[240px] pt-1" :title="roomInfo.title">{{ roomInfo.title || '未连接直播间' }}</h2>
- <p class="text-xs text-slate-500 font-mono">房间 ID: <span class="text-slate-300 font-bold">{{ currentRoomId || '-' }}</span></p>
- </div>
- </div>
- <div class="grid grid-cols-2 gap-3 mt-4">
- <div class="bg-slate-950 border border-slate-800/60 rounded-lg p-3">
- <span class="text-[11px] text-slate-500 block mb-0.5"><i class="fa-solid fa-fire text-amber-500 mr-1"></i>当前人气</span>
- <span class="text-lg font-black font-mono text-amber-400">{{ formatNum(roomInfo.online) }}</span>
- </div>
- <div class="bg-slate-950 border border-slate-800/60 rounded-lg p-3">
- <span class="text-[11px] text-slate-500 block mb-0.5"><i class="fa-solid fa-heart text-pink-500 mr-1"></i>粉丝关注</span>
- <span class="text-lg font-black font-mono text-pink-400">{{ formatNum(roomInfo.attention) }}</span>
- </div>
- </div>
  </div>
 
- <div class="bg-slate-900 border border-slate-800/80 rounded-xl flex-1 flex flex-col shadow-xl overflow-hidden min-h-[400px]">
- <div class="px-4 py-3 bg-slate-900 border-b border-slate-800/60 flex justify-between items-center">
- <h3 class="text-xs font-bold uppercase tracking-wider text-slate-400 flex items-center">
- <i class="fa-regular fa-comments text-blue-500 mr-2 text-sm animate-pulse"></i>实时事件与弹幕流水
- </h3>
- <span class="text-[10px] bg-slate-950 px-2 py-0.5 rounded border border-slate-800 text-slate-500 font-mono">
- 池容量: {{ danmakuList.length }}
- </span>
- </div>
- <div ref="danmakuBox" class="flex-1 overflow-y-auto p-4 space-y-2.5 no-scrollbar">
- <div v-for="(msg, idx) in danmakuList" :key="idx" class="danmaku-item text-xs flex flex-col bg-slate-950/40 p-2 rounded-lg border border-slate-900 hover:border-slate-800/60 transition">
- <div v-if="msg.isSC" class="bg-gradient-to-r from-amber-500/20 to-orange-500/10 border-l-4 border-amber-500 p-2 rounded">
- <div class="flex justify-between font-bold text-amber-400 mb-1">
- <span><i class="fa-solid fa-bolt mr-1"></i>醒目留言 [SC] - {{ msg.username }}</span>
- <span>￥{{ msg.price }}</span>
- </div>
- <p class="text-amber-200 text-sm font-medium">{{ msg.text }}</p>
- </div>
- <div v-else-if="msg.isGift" class="text-purple-400 flex items-center justify-between font-medium">
- <span><i class="fa-solid fa-gift mr-1.5 text-purple-500"></i>{{ msg.username }} 赠送了 <strong>{{ msg.gift_name }}</strong> x{{ msg.num }}</span>
- </div>
- <div v-else-if="msg.isSystem" class="text-slate-500 flex items-center space-x-1.5 font-mono text-[11px]">
- <i :class="msg.type==='like' ? 'fa-solid fa-thumbs-up text-blue-400' : 'fa-solid fa-door-open text-emerald-400'"></i>
- <span>{{ msg.username }} {{ msg.type === 'like' ? '给主播点了赞' : '进入了直播间' }}</span>
- </div>
- <div v-else class="flex items-start space-x-1.5">
- <span class="text-blue-400 font-semibold cursor-pointer hover:underline shrink-0 font-mono" :title="'UID: '+msg.uid">{{ msg.username }}</span>
- <span class="text-slate-200 break-all select-all">{{ msg.text }}</span>
- <span class="text-[9px] text-slate-600 font-mono ml-auto self-center">{{ formatTime(msg.time) }}</span>
- </div>
- </div>
- <div v-if="danmakuList.length === 0" class="h-full flex flex-col items-center justify-center text-slate-600 space-y-2 pt-20">
- <i class="fa-solid fa-inbox text-3xl"></i>
- <p class="text-xs">暂无实时数据涌入，等待上游推流...</p>
- </div>
- </div>
- </div>
- </section>
-
- <section class="col-span-12 lg:col-span-8 flex flex-col space-y-6">
- <div class="grid grid-cols-2 sm:grid-cols-4 gap-4">
- <div class="bg-slate-900 border border-slate-800/80 rounded-xl p-4 shadow-md">
- <p class="text-xs text-slate-500 font-medium">1小时总计互动量</p>
- <h4 class="text-2xl font-black font-mono text-blue-400 mt-1">{{ stats.total_interactions || 0 }} <span class="text-xs font-normal text-slate-600">次</span></h4>
- </div>
- <div class="bg-slate-900 border border-slate-800/80 rounded-xl p-4 shadow-md">
- <p class="text-xs text-slate-500 font-medium">1小时核心弹幕数</p>
- <h4 class="text-2xl font-black font-mono text-indigo-400 mt-1">{{ stats.message_count || 0 }} <span class="text-xs font-normal text-slate-600">条</span></h4>
- </div>
- <div class="bg-slate-900 border border-slate-800/80 rounded-xl p-4 shadow-md">
- <p class="text-xs text-slate-500 font-medium">当前采样时段活跃比</p>
- <h4 class="text-2xl font-black font-mono text-emerald-400 mt-1">{{ activeRatio }} <span class="text-xs font-normal text-slate-600">%</span></h4>
- </div>
- <div class="bg-slate-900 border border-slate-800/80 rounded-xl p-4 shadow-md">
- <p class="text-xs text-slate-500 font-medium">事件聚合类型</p>
- <h4 class="text-2xl font-black font-mono text-purple-400 mt-1">{{ Object.keys(stats.event_counts || {}).length }} <span class="text-xs font-normal text-slate-600">种</span></h4>
- </div>
+ <!-- Enter / Like -->
+ <div class="danmaku-item" v-else-if="msg.isSystem" style="display: flex; align-items: center; gap: 7px; padding: 3px 2px;">
+ <span class="chip" :class="msg.type==='like' ? 'chip-like' : 'chip-enter'">{{ msg.type==='like' ? '赞' : '进入' }}</span>
+ <span style="font-size: 11px; color: var(--text-dim);">{{ msg.username }} {{ msg.type === 'like' ? '点了个赞' : '进入了直播间' }}</span>
  </div>
 
- <div class="grid grid-cols-1 md:grid-cols-12 gap-6">
- <div class="md:col-span-8 bg-slate-900 border border-slate-800/80 rounded-xl p-4 shadow-xl flex flex-col">
- <div class="flex items-center justify-between mb-2 border-b border-slate-800/60 pb-2">
- <h3 class="text-xs font-bold tracking-wider text-slate-400 uppercase"><i class="fa-solid fa-chart-area mr-2 text-blue-500"></i>热度密度趋势时序图</h3>
- <span class="text-[10px] text-slate-500">60s 桶宽采样</span>
+ <!-- Normal danmaku -->
+ <div class="danmaku-item" v-else style="display: flex; align-items: flex-start; gap: 7px; padding: 3px 2px;">
+ <span style="font-size: 12px; font-weight: 700; color: var(--bili-pink); cursor: pointer; flex-shrink: 0; font-family: 'JetBrains Mono', monospace;" :title="'UID: '+msg.uid">{{ msg.username }}</span>
+ <span style="font-size: 12px; color: #cbd5e1; line-height: 1.45; flex: 1; word-break: break-all;">{{ msg.text }}</span>
+ <span style="font-size: 9px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; flex-shrink: 0; align-self: flex-end;">{{ formatTime(msg.time) }}</span>
  </div>
- <div id="timelineChart" class="w-full h-64 bg-slate-950/20 rounded-lg"></div>
- </div>
- <div class="md:col-span-4 bg-slate-900 border border-slate-800/80 rounded-xl p-4 shadow-xl flex flex-col">
- <div class="flex items-center justify-between mb-2 border-b border-slate-800/60 pb-2">
- <h3 class="text-xs font-bold tracking-wider text-slate-400 uppercase"><i class="fa-solid fa-chart-pie mr-2 text-purple-500"></i>事件交互构成</h3>
- </div>
- <div id="pieChart" class="w-full h-64 bg-slate-950/20 rounded-lg"></div>
- </div>
- </div>
+ </template>
 
- <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
- <div class="bg-slate-900 border border-slate-800/80 rounded-xl p-4 flex flex-col shadow-lg">
- <h3 class="text-xs font-bold tracking-wider text-slate-400 uppercase border-b border-slate-800/60 pb-2 mb-3">
- <i class="fa-solid fa-wand-magic-sparkles mr-2 text-indigo-400"></i>高频词语与原生短语 Top 8
- </h3>
- <div class="grid grid-cols-2 gap-4 flex-1">
- <div class="space-y-2">
- <p class="text-[11px] font-bold text-slate-500 font-mono">分词高频词</p>
- <div v-for="(item, idx) in stats.top_keywords?.slice(0, 8)" :key="idx" class="flex items-center justify-between text-xs bg-slate-950 px-2 py-1.5 rounded border border-slate-900">
- <span class="text-slate-300 font-medium truncate max-w-[80px]"><span class="text-[10px] font-mono text-slate-600 mr-1.5">#{{idx+1}}</span>{{ item.name }}</span>
- <span class="font-mono text-indigo-400 font-bold bg-indigo-500/5 px-1 rounded">{{ item.value }}</span>
- </div>
- </div>
- <div class="space-y-2">
- <p class="text-[11px] font-bold text-slate-500 font-mono">原生高频原句</p>
- <div v-for="(item, idx) in stats.top_phrases?.slice(0, 8)" :key="idx" class="flex items-center justify-between text-xs bg-slate-950 px-2 py-1.5 rounded border border-slate-900">
- <span class="text-slate-300 font-medium truncate max-w-[100px]" :title="item.text"><span class="text-[10px] font-mono text-slate-600 mr-1.5">#{{idx+1}}</span>{{ item.text }}</span>
- <span class="font-mono text-blue-400 font-bold bg-blue-500/5 px-1 rounded">{{ item.count }}</span>
+ <div v-if="danmakuList.length === 0" style="height: 100%; min-height: 200px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; color: var(--text-dim);">
+ <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" opacity="0.4"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>
+ <p style="font-size: 11px; text-align: center; line-height: 1.6;">暂无弹幕数据<br>等待直播间连接...</p>
  </div>
  </div>
  </div>
  </div>
 
- <div class="bg-slate-900 border border-slate-800/80 rounded-xl p-4 flex flex-col shadow-lg">
- <h3 class="text-xs font-bold tracking-wider text-slate-400 uppercase border-b border-slate-800/60 pb-2 mb-3">
- <i class="fa-solid fa-trophy mr-2 text-amber-500"></i>核心活跃用户高频互动榜
- </h3>
- <div class="space-y-2 overflow-y-auto no-scrollbar flex-1 max-h-[220px]">
- <div v-for="(user, idx) in stats.top_users?.slice(0, 5)" :key="idx" class="flex items-center justify-between text-xs bg-slate-950 p-2.5 rounded-lg border border-slate-900/60">
- <div class="flex items-center space-x-2.5">
- <span class="w-5 h-5 flex items-center justify-center rounded-md text-[10px] font-black font-mono"
- :class="idx===0?'bg-amber-500/20 text-amber-400 border border-amber-500/30':idx===1?'bg-slate-300/20 text-slate-300':idx===2?'bg-amber-700/20 text-amber-600':'bg-slate-800 text-slate-500'">
+ <!-- ── RIGHT COLUMN ── -->
+ <div style="display: flex; flex-direction: column; gap: 16px;">
+
+ <!-- Stat cards row -->
+ <div style="display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px;">
+ <div class="card" style="padding: 16px 18px;">
+ <div style="font-size: 10px; color: var(--text-dim); margin-bottom: 6px; letter-spacing: 0.04em;">1小时总互动</div>
+ <div class="stat-num" style="font-size: 26px; font-weight: 700; color: var(--bili-blue); line-height: 1;">{{ stats.total_interactions || 0 }}</div>
+ <div style="font-size: 10px; color: var(--text-dim); margin-top: 3px;">次</div>
+ </div>
+ <div class="card" style="padding: 16px 18px;">
+ <div style="font-size: 10px; color: var(--text-dim); margin-bottom: 6px; letter-spacing: 0.04em;">核心弹幕数</div>
+ <div class="stat-num" style="font-size: 26px; font-weight: 700; color: #818cf8; line-height: 1;">{{ stats.message_count || 0 }}</div>
+ <div style="font-size: 10px; color: var(--text-dim); margin-top: 3px;">条</div>
+ </div>
+ <div class="card" style="padding: 16px 18px;">
+ <div style="font-size: 10px; color: var(--text-dim); margin-bottom: 6px; letter-spacing: 0.04em;">活跃互动比</div>
+ <div class="stat-num" style="font-size: 26px; font-weight: 700; color: #22d3a0; line-height: 1;">{{ activeRatio }}</div>
+ <div style="font-size: 10px; color: var(--text-dim); margin-top: 3px;">%</div>
+ </div>
+ <div class="card" style="padding: 16px 18px;">
+ <div style="font-size: 10px; color: var(--text-dim); margin-bottom: 6px; letter-spacing: 0.04em;">事件聚合类型</div>
+ <div class="stat-num" style="font-size: 26px; font-weight: 700; color: var(--bili-pink); line-height: 1;">{{ Object.keys(stats.event_counts || {}).length }}</div>
+ <div style="font-size: 10px; color: var(--text-dim); margin-top: 3px;">种</div>
+ </div>
+ </div>
+
+ <!-- Charts row -->
+ <div style="display: grid; grid-template-columns: 1fr 300px; gap: 16px;">
+ <div class="card" style="padding: 18px;">
+ <div style="display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px;">
+ <div class="section-title">热度密度时序趋势</div>
+ <span style="font-size: 10px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; background: rgba(255,255,255,0.03); padding: 2px 8px; border-radius: 5px; border: 1px solid var(--border);">60s 采样</span>
+ </div>
+ <div id="timelineChart" style="width: 100%; height: 220px;"></div>
+ </div>
+ <div class="card" style="padding: 18px;">
+ <div style="margin-bottom: 14px;">
+ <div class="section-title">事件类型分布</div>
+ </div>
+ <div id="pieChart" style="width: 100%; height: 220px;"></div>
+ </div>
+ </div>
+
+ <!-- Keywords & Top users -->
+ <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 16px;">
+
+ <!-- Keywords -->
+ <div class="card" style="padding: 18px;">
+ <div style="margin-bottom: 14px;">
+ <div class="section-title">弹幕高频词 Top 8</div>
+ </div>
+ <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 10px 20px;">
+ <div>
+ <div style="font-size: 10px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; margin-bottom: 8px; letter-spacing: 0.06em;">分词词频</div>
+ <div style="display: flex; flex-direction: column; gap: 5px;">
+ <div v-for="(item, idx) in stats.top_keywords?.slice(0, 8)" :key="idx" style="display: flex; align-items: center; gap: 8px;">
+ <span style="font-size: 9px; font-family: 'JetBrains Mono', monospace; color: var(--text-dim); width: 14px; text-align: right; flex-shrink: 0;">{{ idx+1 }}</span>
+ <span style="font-size: 12px; color: #cbd5e1; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ item.name }}</span>
+ <span class="stat-num" style="font-size: 11px; font-weight: 700; color: #818cf8;">{{ item.value }}</span>
+ </div>
+ </div>
+ </div>
+ <div>
+ <div style="font-size: 10px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; margin-bottom: 8px; letter-spacing: 0.06em;">原句高频</div>
+ <div style="display: flex; flex-direction: column; gap: 5px;">
+ <div v-for="(item, idx) in stats.top_phrases?.slice(0, 8)" :key="idx" style="display: flex; align-items: center; gap: 8px;">
+ <span style="font-size: 9px; font-family: 'JetBrains Mono', monospace; color: var(--text-dim); width: 14px; text-align: right; flex-shrink: 0;">{{ idx+1 }}</span>
+ <span style="font-size: 12px; color: #cbd5e1; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" :title="item.text">{{ item.text }}</span>
+ <span class="stat-num" style="font-size: 11px; font-weight: 700; color: var(--bili-blue);">{{ item.count }}</span>
+ </div>
+ </div>
+ </div>
+ </div>
+ </div>
+
+ <!-- Top users -->
+ <div class="card" style="padding: 18px;">
+ <div style="margin-bottom: 14px;">
+ <div class="section-title">活跃用户互动榜</div>
+ </div>
+ <div style="display: flex; flex-direction: column; gap: 8px;">
+ <div v-for="(user, idx) in stats.top_users?.slice(0, 5)" :key="idx"
+  style="display: flex; align-items: center; gap: 10px; padding: 9px 12px; background: rgba(255,255,255,0.02); border: 1px solid var(--border); border-radius: 9px; transition: background 0.15s;"
+  @mouseenter="$event.currentTarget.style.background='rgba(255,255,255,0.04)'"
+  @mouseleave="$event.currentTarget.style.background='rgba(255,255,255,0.02)'">
+ <div class="tag" style="width: 22px; height: 22px; display: flex; align-items: center; justify-content: center; border-radius: 7px; font-size: 11px; font-weight: 900; flex-shrink: 0;"
+ :class="idx===0?'rank-1':idx===1?'rank-2':idx===2?'rank-3':'rank-n'">
  {{ idx + 1 }}
- </span>
- <span class="text-slate-200 font-semibold">{{ user.username }}</span>
  </div>
- <div class="text-right">
- <span class="font-mono text-xs font-bold text-slate-400">{{ user.count }} <span class="text-[10px] text-slate-600 font-normal">交互</span></span>
- </div>
- </div>
+ <span style="font-size: 13px; font-weight: 600; color: #e2e8f0; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">{{ user.username }}</span>
+ <div style="text-align: right; flex-shrink: 0;">
+ <span class="stat-num" style="font-size: 14px; font-weight: 700; color: #94a3b8;">{{ user.count }}</span>
+ <span style="font-size: 10px; color: var(--text-dim); margin-left: 3px;">次</span>
  </div>
  </div>
+ <div v-if="!stats.top_users?.length" style="text-align: center; padding: 24px 0; color: var(--text-dim); font-size: 12px;">暂无数据</div>
  </div>
- </section>
+ </div>
+
+ </div>
+ </div>
+ </div>
  </main>
 
+ <!-- ═══ LOGIN MODAL ═══ -->
  <transition name="fade">
- <div v-if="showLoginModal" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/80 backdrop-blur-sm">
- <div class="bg-slate-900 border border-slate-800 rounded-2xl w-full max-w-sm p-6 shadow-2xl relative">
- <button @click="closeLoginModal" class="absolute top-4 right-4 text-slate-500 hover:text-slate-300 transition text-sm">
- <i class="fa-solid fa-xmark text-lg"></i>
+ <div v-if="showLoginModal" class="modal-backdrop" style="position: fixed; inset: 0; z-index: 50; display: flex; align-items: center; justify-content: center; padding: 20px;" @click.self="closeLoginModal">
+ <div class="modal-box" style="width: 100%; max-width: 360px; padding: 28px; position: relative;">
+ <button @click="closeLoginModal" style="position: absolute; top: 16px; right: 16px; background: rgba(255,255,255,0.06); border: 1px solid var(--border); border-radius: 8px; width: 30px; height: 30px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: var(--text-muted); transition: all 0.15s;" @mouseenter="$event.currentTarget.style.background='rgba(255,255,255,0.1)'" @mouseleave="$event.currentTarget.style.background='rgba(255,255,255,0.06)'">
+ <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
  </button>
- <div class="text-center space-y-2 mb-4">
- <h3 class="text-base font-bold text-slate-100">B站官方全端口安全登录</h3>
- <p class="text-xs text-slate-400">规避高频采集可能面临的无鉴权强行限流</p>
+
+ <div style="margin-bottom: 22px;">
+ <div style="font-size: 17px; font-weight: 700; color: #f1f5f9; margin-bottom: 5px;">B站账号登录</div>
+ <div style="font-size: 12px; color: var(--text-muted); line-height: 1.5;">登录后可规避无鉴权限流，保障数据采集稳定性</div>
  </div>
 
- <div class="bg-slate-950 border border-slate-800/80 p-4 rounded-xl flex flex-col items-center justify-center min-h-[220px]">
- <div v-if="qrLoading" class="text-slate-500 text-xs flex flex-col items-center space-y-2">
- <i class="fa-solid fa-circle-notch animate-spin text-xl text-blue-500"></i>
- <span>正在向B站安全授权中心申请密钥...</span>
+ <div style="background: rgba(255,255,255,0.03); border: 1px solid var(--border); border-radius: 12px; padding: 24px; display: flex; flex-direction: column; align-items: center; min-height: 220px; justify-content: center;">
+ <div v-if="qrLoading" style="display: flex; flex-direction: column; align-items: center; gap: 12px; color: var(--text-muted);">
+ <div style="width: 24px; height: 24px; border: 2px solid var(--border); border-top-color: var(--bili-pink); border-radius: 50%; animation: spin 0.8s linear infinite;"></div>
+ <span style="font-size: 12px;">正在申请二维码...</span>
  </div>
  <template v-else>
- <img :src="qrImgUrl" class="w-44 h-44 rounded-lg bg-white p-1 border-2 border-blue-500/30 shadow-lg" alt="二维码">
- <div class="mt-3 text-[11px] px-3 py-1 rounded-full font-mono"
- :class="qrStatus==='scanned'?'bg-blue-500/20 text-blue-400':'bg-slate-900 text-slate-500'">
- <i class="fa-solid" :class="qrStatus==='scanned'?'fa-mobile-screen animate-bounce':'fa-qrcode'"></i>
- <span class="ml-1.5">{{ qrMessage }}</span>
+ <img :src="qrImgUrl" style="width: 160px; height: 160px; border-radius: 10px; background: #fff; padding: 6px; border: 2px solid rgba(251,114,153,0.3);" alt="扫码登录">
+ <div style="margin-top: 14px; font-size: 11px; padding: 5px 14px; border-radius: 99px; display: flex; align-items: center; gap: 6px; font-family: 'JetBrains Mono', monospace;"
+ :style="qrStatus==='scanned'?'background:rgba(0,161,214,0.12);color:var(--bili-blue);':'background:rgba(255,255,255,0.04);color:var(--text-muted);'">
+ <svg v-if="qrStatus==='scanned'" width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+ <svg v-else width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+ {{ qrMessage }}
  </div>
  </template>
  </div>
 
- <div class="mt-4 flex justify-center">
- <button @click="refreshQrCode" class="text-xs text-blue-400 hover:text-blue-300 font-semibold transition">
- <i class="fa-solid fa-rotate-right mr-1"></i>刷新二维码
+ <div style="margin-top: 16px; text-align: center;">
+ <button @click="refreshQrCode" style="background: none; border: none; color: var(--bili-pink); font-size: 12px; font-weight: 600; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; padding: 5px 10px; border-radius: 6px; transition: background 0.15s;" @mouseenter="$event.currentTarget.style.background='var(--bili-pink-glow)'" @mouseleave="$event.currentTarget.style.background='transparent'">
+ <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="1 4 1 10 7 10"/><path d="M3.51 15a9 9 0 1 0 .49-6H1"/></svg>
+ 刷新二维码
  </button>
  </div>
  </div>
  </div>
  </transition>
 
- </div>
+</div>
 
- <script>
- const { createApp, ref, onMounted, nextTick, computed } = Vue;
+<style>
+@keyframes spin { to { transform: rotate(360deg); } }
+</style>
 
- createApp({
+<script>
+const { createApp, ref, onMounted, nextTick, computed } = Vue;
+
+createApp({
  setup() {
  const targetRoomId = ref("23255738");
  const currentRoomId = ref("");
  const wsConnected = ref(false);
  const showLoginModal = ref(false);
 
- // 房间指标
  const roomInfo = ref({ title: "加载中...", live_status: 0, online: 0, attention: 0, area_name: "" });
  const cookieStatus = ref({ exists: false, has_login: false });
  const danmakuList = ref([]);
  const stats = ref({ total_interactions: 0, message_count: 0, top_users: [], top_keywords: [], top_phrases: [] });
 
- // 扫码核心
  const qrLoading = ref(false);
  const qrImgUrl = ref("");
  const qrStatus = ref("pending");
  const qrMessage = ref("等待扫码");
  let qrPollTimer = null;
  let wsInstance = null;
-
- // 图表指针
  let timelineChart = null;
  let pieChart = null;
 
  const danmakuBox = ref(null);
 
- // 计算当前活跃占比
  const activeRatio = computed(() => {
- if(!roomInfo.value.online || !stats.value.total_interactions) return 0;
+ if (!roomInfo.value.online || !stats.value.total_interactions) return 0;
  return ((stats.value.top_users?.length || 5) / roomInfo.value.online * 100).toFixed(2);
  });
 
- // 初始化 ECharts
  const initCharts = () => {
  const lineEl = document.getElementById('timelineChart');
  const pieEl = document.getElementById('pieChart');
 
- if(lineEl) {
+ if (lineEl) {
  timelineChart = echarts.init(lineEl, 'dark');
  timelineChart.setOption({
  backgroundColor: 'transparent',
- tooltip: { trigger: 'axis', backgroundColor: '#0f172a', borderColor: '#1e293b' },
- grid: { left: '3%', right: '4%', bottom: '3%', top: '12%', containLabel: true },
- xAxis: { type: 'time', splitLine: { show: false }, axisLine: { lineStyle: { color: '#334155' } } },
- yAxis: { type: 'value', splitLine: { lineStyle: { color: '#1e293b' } }, axisLine: { show: false } },
- series: [{ name: '采样弹幕频次', type: 'line', smooth: true, showSymbol: false, areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(59,130,246,0.3)' }, { offset: 1, color: 'rgba(59,130,246,0)' }]) }, itemStyle: { color: '#3b82f6' }, data: [] }]
+ tooltip: { trigger: 'axis', backgroundColor: '#0d1117', borderColor: '#1e293b', textStyle: { color: '#e2e8f0', fontSize: 11 } },
+ grid: { left: '2%', right: '3%', bottom: '3%', top: '10%', containLabel: true },
+ xAxis: { type: 'time', splitLine: { show: false }, axisLine: { lineStyle: { color: '#1e293b' } }, axisLabel: { color: '#5a6070', fontSize: 10, fontFamily: "'JetBrains Mono', monospace" } },
+ yAxis: { type: 'value', splitLine: { lineStyle: { color: '#151a22' } }, axisLine: { show: false }, axisLabel: { color: '#5a6070', fontSize: 10, fontFamily: "'JetBrains Mono', monospace" } },
+ series: [{
+ name: '弹幕频次', type: 'line', smooth: true, showSymbol: false,
+ areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(251,114,153,0.25)' }, { offset: 1, color: 'rgba(251,114,153,0)' }]) },
+ lineStyle: { color: '#fb7299', width: 2 },
+ itemStyle: { color: '#fb7299' }, data: []
+ }]
  });
  }
 
- if(pieEl) {
+ if (pieEl) {
  pieChart = echarts.init(pieEl, 'dark');
  pieChart.setOption({
  backgroundColor: 'transparent',
- tooltip: { trigger: 'item' },
- legend: { bottom: '0', textStyle: { color: '#94a3b8', fontSize: 10 }, icon: 'circle' },
- series: [{ name: '交互类型', type: 'pie', radius: ['45%', '70%'], center: ['50%', '42%'], avoidLabelOverlap: false, itemStyle: { borderRadius: 6 }, label: { show: false }, data: [] }]
+ tooltip: { trigger: 'item', backgroundColor: '#0d1117', borderColor: '#1e293b', textStyle: { color: '#e2e8f0', fontSize: 11 } },
+ legend: { bottom: '-2%', textStyle: { color: '#5a6070', fontSize: 9, fontFamily: "'JetBrains Mono', monospace" }, icon: 'circle', itemWidth: 7, itemHeight: 7 },
+ color: ['#fb7299', '#00a1d6', '#818cf8', '#22d3a0', '#f5c842'],
+ series: [{
+ name: '交互类型', type: 'pie', radius: ['42%', '68%'], center: ['50%', '44%'],
+ avoidLabelOverlap: false, itemStyle: { borderRadius: 5, borderColor: '#111318', borderWidth: 2 },
+ label: { show: false }, data: []
+ }]
  });
  }
  };
 
- // 拉取一小时深度聚合数据并灌入图表
  const fetchAnalytics = async () => {
  if (!currentRoomId.value) return;
  try {
@@ -317,15 +533,13 @@
  const d = await res.json();
  stats.value = d;
 
- // 更新时序曲线
- if(timelineChart && d.density) {
+ if (timelineChart && d.density) {
  const chartData = d.density.map(item => [item.time * 1000, item.count]);
  timelineChart.setOption({ series: [{ data: chartData }] });
  }
 
- // 更新构成饼图
- if(pieChart && d.event_counts) {
- const mapName = { danmaku: '普通弹幕', gift: '道具礼物', super_chat: '醒目SC', like: '粉丝点赞', enter: '欢迎进房' };
+ if (pieChart && d.event_counts) {
+ const mapName = { danmaku: '弹幕', gift: '礼物', super_chat: 'SC', like: '点赞', enter: '进房' };
  const pieData = Object.keys(d.event_counts)
  .filter(k => k !== 'total' && d.event_counts[k] > 0)
  .map(k => ({ name: mapName[k] || k, value: d.event_counts[k] }));
@@ -336,7 +550,6 @@
  }
  };
 
- // 轮询服务基本状态
  const checkServiceStatus = async () => {
  try {
  const res = await fetch("/api/status");
@@ -351,7 +564,6 @@
  }
  };
 
- // 扫码登录模块核心
  const openLoginModal = async () => {
  showLoginModal.value = true;
  await refreshQrCode();
@@ -375,7 +587,7 @@
  startPollingQr(d.key);
  }
  } catch (e) {
- qrMessage.value = "申请中心生成错误";
+ qrMessage.value = "申请生成错误";
  } finally {
  qrLoading.value = false;
  }
@@ -391,10 +603,7 @@
  qrMessage.value = d.message;
  if (d.status === 'ok') {
  clearInterval(qrPollTimer);
- setTimeout(() => {
- closeLoginModal();
- checkServiceStatus();
- }, 1000);
+ setTimeout(() => { closeLoginModal(); checkServiceStatus(); }, 1000);
  }
  } else {
  qrMessage.value = d.message;
@@ -406,19 +615,15 @@
  }, 2500);
  };
 
- // 连接 WebSocket 核心推流
  const connectWebSocket = () => {
  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
- const wsUrl = `${protocol}//${window.location.host}/ws`;
-
- wsInstance = new WebSocket(wsUrl);
+ wsInstance = new WebSocket(`${protocol}//${window.location.host}/ws`);
 
  wsInstance.onopen = () => {
  wsConnected.value = true;
  setInterval(() => {
- if(wsInstance.readyState === WebSocket.OPEN) {
- wsInstance.send(JSON.stringify({ action: "ping" }));
- }
+ if (wsInstance.readyState === WebSocket.OPEN)
+  wsInstance.send(JSON.stringify({ action: "ping" }));
  }, 25000);
  };
 
@@ -426,28 +631,19 @@
  const payload = JSON.parse(event.data);
  if (payload.type === "pong") return;
 
- let item = { time: payload.data?.time || (Date.now()/1000), username: payload.data?.username };
+ let item = { time: payload.data?.time || (Date.now() / 1000), username: payload.data?.username };
 
- if (payload.type === "danmaku") {
- item = { ...item, uid: payload.data.uid, text: payload.data.text };
- } else if (payload.type === "gift") {
- item = { ...item, isGift: true, gift_name: payload.data.gift_name, num: payload.data.num };
- } else if (payload.type === "super_chat") {
- item = { ...item, isSC: true, text: payload.data.text, price: payload.data.price };
- } else if (payload.type === "like" || payload.type === "enter") {
- item = { ...item, isSystem: true, type: payload.type };
- } else if (payload.type === "metrics") {
- roomInfo.value = { ...roomInfo.value, ...payload.data };
- return;
- }
+ if (payload.type === "danmaku") item = { ...item, uid: payload.data.uid, text: payload.data.text };
+ else if (payload.type === "gift") item = { ...item, isGift: true, gift_name: payload.data.gift_name, num: payload.data.num };
+ else if (payload.type === "super_chat") item = { ...item, isSC: true, text: payload.data.text, price: payload.data.price };
+ else if (payload.type === "like" || payload.type === "enter") item = { ...item, isSystem: true, type: payload.type };
+ else if (payload.type === "metrics") { roomInfo.value = { ...roomInfo.value, ...payload.data }; return; }
 
  danmakuList.value.push(item);
  if (danmakuList.value.length > 500) danmakuList.value.shift();
 
  nextTick(() => {
- if(danmakuBox.value) {
- danmakuBox.value.scrollTop = danmakuBox.value.scrollHeight;
- }
+ if (danmakuBox.value) danmakuBox.value.scrollTop = danmakuBox.value.scrollHeight;
  });
  };
 
@@ -457,37 +653,35 @@
  };
  };
 
- // 指令式切换目标房间
  const switchRoom = async () => {
  if (!targetRoomId.value.trim()) return;
  try {
- const res = await fetch(`/api/room/${targetRoomId.value}/connect`, { method: "POST" });
- const d = await res.json();
+ await fetch(`/api/room/${targetRoomId.value}/connect`, { method: "POST" });
  currentRoomId.value = targetRoomId.value;
  danmakuList.value = [];
  checkServiceStatus();
  fetchAnalytics();
  } catch (e) {
- alert("转换房间指令失败");
+ alert("切换房间失败");
  }
  };
 
- // 通用辅助格式化器
  const formatTime = (ts) => {
- if(!ts) return "";
+ if (!ts) return "";
  const d = new Date(ts * 1000);
  return d.toTimeString().split(' ')[0];
  };
 
  const formatNum = (num) => {
- if(num >= 10000) return (num / 10000).toFixed(1) + ' 万';
+ if (!num) return 0;
+ if (num >= 10000) return (num / 10000).toFixed(1) + ' 万';
  return num;
  };
 
  onMounted(() => {
  initCharts();
  checkServiceStatus().then(() => {
- if(currentRoomId.value) targetRoomId.value = currentRoomId.value;
+ if (currentRoomId.value) targetRoomId.value = currentRoomId.value;
  fetchAnalytics();
  });
  connectWebSocket();
@@ -509,7 +703,7 @@
  formatTime, formatNum
  };
  }
- }).mount('#app');
- </script>
+}).mount('#app');
+</script>
 </body>
 </html>
