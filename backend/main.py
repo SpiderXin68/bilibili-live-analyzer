@@ -23,8 +23,12 @@ logging.basicConfig(
 logging.getLogger("aiohttp").setLevel(logging.WARNING)
 logging.getLogger("aiosqlite").setLevel(logging.WARNING)
 
-from server import app, SERVER_HOST, SERVER_PORT
+from server import app
 from config import settings
+
+# 用于默认值
+SERVER_HOST = settings.SERVER_HOST
+SERVER_PORT = settings.SERVER_PORT
 
 
 def main():
